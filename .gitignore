@@ -1,0 +1,28 @@
+# Entornos virtuales y caches de Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Binarios compilados localmente
+vo_ocr
+vo_bridge
+
+# Configuraciones locales con credenciales o endpoints internos
+config.local.json
+*.local.json
+profiles/*.local.json
+!profiles/.gitkeep
+.env
+.env.*
+
+# Salidas de reportes y capturas generadas en cada ejecucion
+reportes/
+*_report_*/
+*.zip
+
+# Archivos de sistema macOS / IDE
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,27 @@
+{
+  "device": "iPhone 18 Pro",
+  "device_matrix": [
+    "iPhone 18 Pro",
+    "iPhone XR"
+  ],
+  "locale": "es-AR",
+  "app_pkg": "com.example.myapp",
+  "i18n_db_name": "",
+  "keep_alive_sec": 0,
+  "sim_timeout": 30,
+  "login_url": "",
+  "sso_url": "",
+  "sso_token": "",
+  "login_body": {},
+  "sso_body": {},
+  "jira_base_url": "https://your-org.atlassian.net",
+  "jira_bugs": [],
+  "views": {
+    "home": {
+      "title": "Home screen",
+      "short_title": "Home",
+      "steps": 50,
+      "out": "reportes/home"
+    }
+  }
+}
