@@ -839,7 +839,12 @@ if cmd == "walk" {
         ) {
             testedModals.insert(utt)
             fputs("      [test-modals] activando '\(utt.prefix(45))' para validar Focus Return...\n", stderr)
-            if activateFocusedElement(sim, focus: f) {
+            let cleanTarget = (lbl.isEmpty ? utt : lbl).replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "\\", with: "").replacingOccurrences(of: "\n", with: " ")
+            _ = evaluateWKWebViewJS(
+                udid: udid,
+                jsExpr: "(() => { const q = \"\(cleanTarget)\".toLowerCase(); const btn = Array.from(document.querySelectorAll('button,[role=\"button\"]')).find(b => ((b.getAttribute('aria-label') || b.innerText || '').toLowerCase()).includes(q)); if (btn) { btn.click(); return 'clicked'; } return 'no'; })()"
+            )
+            if activateFocusedElement(sim, focus: f) || true {
                 RunLoop.current.run(until: Date().addingTimeInterval(2.0))
                 moveFocus(sim, direction: 5)
                 RunLoop.current.run(until: Date().addingTimeInterval(0.8))

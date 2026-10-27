@@ -290,9 +290,33 @@ class IosClient:
         except Exception:
             pass
 
+    def ensure_app_installed(self, bundle_id):
+        """Verifica si bundle_id esta instalado en este simulador; si falta, lo clona automaticamente de otro simulador local."""
+        if not bundle_id:
+            return False
+        cur = self._simctl(["get_app_container", self.device, bundle_id, "app"], check=False).strip()
+        if cur and os.path.isdir(cur):
+            return True
+        sim_root = os.path.expanduser("~/Library/Developer/CoreSimulator/Devices")
+        for app_cand in glob.glob(os.path.join(sim_root, "*", "data", "Containers", "Bundle", "Application", "*", "*.app")):
+            plist_p = os.path.join(app_cand, "Info.plist")
+            if not os.path.isfile(plist_p):
+                continue
+            try:
+                with open(plist_p, "rb") as fp:
+                    info = plistlib.load(fp)
+                if info.get("CFBundleIdentifier") == bundle_id:
+                    print("      [preflight] instalando %s (%s) en %s..." % (os.path.basename(app_cand), bundle_id, self.device_name or self.device))
+                    self._simctl(["install", self.device, app_cand], check=False, timeout=120)
+                    return True
+            except Exception:
+                continue
+        return False
+
     def ensure_app_foreground(self, bundle_id, relaunch=False):
         if not bundle_id:
             return
+        self.ensure_app_installed(bundle_id)
         if relaunch:
             self._simctl(["terminate", self.device, bundle_id], check=False)
             time.sleep(0.8)

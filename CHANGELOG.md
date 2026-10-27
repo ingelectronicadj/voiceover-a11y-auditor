@@ -2,6 +2,19 @@
 
 Todas las mejoras relevantes de la herramienta de auditoría lineal de accesibilidad con iOS VoiceOver y Xcode se registran en este archivo siguiendo [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) y [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.3.0] - 2026-10-27
+
+### Añadido
+- **Comparador multiplataforma iOS VoiceOver vs Android TalkBack (`--compare`, `vo_audit/compare.py`)**:
+  - Genera reportes HTML lado a lado (`comparison_ios_vs_android.html` y `comparison_index.html`) cruzando cada paso y selector DOM entre `WKWebView` (WebKit) y `Android WebView` (Chromium).
+  - Clasifica automáticamente diferencias exclusivas de iOS (fragmentación 5x de enlaces compuestos `<a>`, pérdida de traits interactivos `Tab`/`Button`/`Text Field`, exposición de valor crudo `0, Toggle`), diferencias exclusivas de Android (`Unlabelled. Image`, nodo vacío `status`, truncamiento de tickers) y defectos compartidos.
+- **Detección de pérdida de traits interactivos en WebKit (`vo_audit/report.py`, `vo_audit/rwi.py`)**:
+  - Cruza cada paso de VoiceOver con su nodo en `dom_snapshot` (por texto y por geometría `getBoundingClientRect`): si el elemento DOM es `<button>`, `<input>` o tiene `role="tab"`, pero VoiceOver no verbaliza ningún trait interactivo (`Button`, `Tab`, `Text Field`, `Toggle`), registra automáticamente un hallazgo `VO-NAME-001` (WCAG 4.1.2).
+- **Auto-recuperación pre-barrido ante estados de error o skeletons transitorios (`vo_audit/rwi.py`)**:
+  - Antes de iniciar el recorrido de VoiceOver, verifica si el `WKWebView` cayó en una pantalla de error (`Retry`) o sigue en carga inicial y reintenta automáticamente en la misma sesión `RWIChannel`.
+- **Preflight e instalación automática en matrices multi-dispositivo (`vo_audit/ios_client.py`)**:
+  - Verifica que la aplicación bajo prueba esté instalada en todos los simuladores de `--devices` / `device_matrix`, clonando automáticamente el paquete `.app` desde el simulador principal si falta en alguno de los simuladores secundarios.
+
 ## [0.2.0] - 2026-10-26
 
 ### Añadido

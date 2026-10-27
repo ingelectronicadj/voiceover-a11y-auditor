@@ -159,6 +159,11 @@ DOM_EXTRACT_JS = r"""
       }
     }
     const keyMeta = resolveKeyMeta(label, ariaLabel, testId);
+    const r = el.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const rect = (r && r.width > 0 && r.height > 0)
+      ? [Math.round(r.left * dpr), Math.round(r.top * dpr), Math.round(r.right * dpr), Math.round(r.bottom * dpr)]
+      : null;
     out.push({
       tag,
       selector: sel,
@@ -170,6 +175,7 @@ DOM_EXTRACT_JS = r"""
       ariaHidden,
       ariaLive,
       tabindex,
+      rect,
       label: label.slice(0, 220),
       i18nKey: keyMeta ? keyMeta.key : '',
       i18nOrigin: keyMeta ? keyMeta.origin : '',
@@ -178,6 +184,9 @@ DOM_EXTRACT_JS = r"""
   }
   const bMatch = location.href.match(/\/hybrid\/[^/]+\/([^/]+)\//);
   const h1Text = (document.querySelector('h1')?.innerText || document.querySelector('h1')?.textContent || '').trim().replace(/\s+/g, ' ');
+  const bodyTxt = (document.body?.innerText || '').toLowerCase();
+  const hasErrorState = Boolean(document.querySelector('[data-testid*="retry"], [data-testid*="error-page"]')) || /something went wrong|there was a problem loading|tuvimos un problema/i.test(bodyTxt);
+  const hasSkeleton = Boolean(document.querySelector('[data-testid*="skeleton"]')) || (out.length <= 16 && /loading |cargando /i.test(bodyTxt));
   return JSON.stringify({
     url: location.href,
     routeHash: location.hash || location.pathname || '',
@@ -185,6 +194,8 @@ DOM_EXTRACT_JS = r"""
     bundleVersion: (bMatch ? bMatch[1] : '') || window.WEB_VERSION || '',
     lang: document.documentElement.getAttribute('lang') || '',
     circleCount: document.querySelectorAll('circle[data-testid="node-circle"]').length,
+    hasErrorState,
+    hasSkeleton,
     i18nDict,
     elements: out
   });
@@ -260,11 +271,31 @@ def run_rwi_steps(ios_client, cdp_steps):
     _rwi_eval(ios_client, js, await_promise=True)
 
 
-def capture_webview_dom(ios_client, cdp_steps=None):
-    """Ejecuta opcionalmente cdp_steps y extrae el inventario DOM/ARIA y diccionario i18n (IndexedDB) en una unica sesion RWI."""
+def capture_webview_dom(ios_client, cdp_steps=None, allow_skeleton=False):
+    """Ejecuta opcionalmente cdp_steps, reintenta si detecta pantalla de error o skeleton transitorio, y extrae el inventario DOM/ARIA y diccionario i18n (IndexedDB) en una unica sesion RWI."""
     steps_code = _build_steps_js(cdp_steps) if cdp_steps else ""
-    if steps_code:
-        combined_js = "(async () => {\n  %s\n  return await %s;\n})()" % (steps_code, DOM_EXTRACT_JS.strip())
+    auto_heal_js = ""
+    if not allow_skeleton:
+        auto_heal_js = """
+  for (let _try = 0; _try < 2; _try++) {
+    const _bt = (document.body?.innerText || '').toLowerCase();
+    const _retryBtn = Array.from(document.querySelectorAll('button')).find(b => /retry|reintentar/i.test(b.innerText || b.textContent || ''));
+    if (_retryBtn || /something went wrong|tuvimos un problema/i.test(_bt)) {
+      if (_retryBtn) _retryBtn.click();
+      await new Promise(r => setTimeout(r, 4500));
+    } else if (document.querySelectorAll('button,a,input,h2,h3').length <= 3 && /loading |cargando /i.test(_bt)) {
+      await new Promise(r => setTimeout(r, 3500));
+    } else {
+      break;
+    }
+  }
+  try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch(e) {}"""
+    if steps_code or auto_heal_js:
+        combined_js = "(async () => {\n  %s\n  %s\n  return await %s;\n})()" % (
+            steps_code,
+            auto_heal_js,
+            DOM_EXTRACT_JS.strip(),
+        )
     else:
         combined_js = DOM_EXTRACT_JS
     res = _rwi_eval(ios_client, combined_js, await_promise=True)
@@ -288,8 +319,8 @@ def _strip_vo_role_suffix(text):
     return s.strip()
 
 
-def match_dom_element(utterance, label, dom_snapshot):
-    """Correlaciona el anuncio de VoiceOver con el elemento DOM real del WKWebView."""
+def match_dom_element(utterance, label, dom_snapshot, box=None):
+    """Correlaciona el anuncio de VoiceOver con el elemento DOM real del WKWebView (por texto y por geometria)."""
     if not dom_snapshot or not dom_snapshot.get("elements"):
         return None
     elements = dom_snapshot["elements"]
@@ -298,9 +329,9 @@ def match_dom_element(utterance, label, dom_snapshot):
         for el in elements:
             if el["tag"] == "svg" and el["testId"].startswith("line-chart"):
                 return el
-    if "signo de dólar" in u_raw or "dollar sign" in u_raw:
+    if "signo de dólar" in u_raw or "dollar sign" in u_raw or u_raw.strip() in ("€", "euro"):
         for el in elements:
-            if el.get("id") == "inputCurrencyAffix" or el.get("label", "").strip() == "$":
+            if el.get("id") == "inputCurrencyAffix" or el.get("label", "").strip() in ("$", "€"):
                 return el
     if "posible texto" in u_raw or "possible text" in u_raw or "detected: text" in u_raw:
         for el in elements:
@@ -312,13 +343,26 @@ def match_dom_element(utterance, label, dom_snapshot):
                 return el
     has_interactive_role = bool(
         re.search(
-            r"\b(bot[oó]n|button|enlace|v[ií]nculo|link|campo de texto|text field|opci[oó]n|pestaña|tab)\b",
+            r"\b(bot[oó]n|button|enlace|v[ií]nculo|link|campo de texto|text field|opci[oó]n|pestaña|tab|toggle|conmutador)\b",
             u_raw,
         )
     )
     cleaned = _strip_vo_role_suffix(utterance or label)
     utt_n = norm_utt(cleaned) or norm_utt(utterance or label)
     if not utt_n or len(utt_n) < 2:
+        if box and len(box) == 4:
+            bx1, by1, bx2, by2 = box
+            bcx, bcy = (bx1 + bx2) / 2.0, (by1 + by2) / 2.0
+            best_geo = None
+            for el in elements:
+                r = el.get("rect")
+                if r and len(r) == 4 and el.get("tag") not in ("main", "div"):
+                    rcx, rcy = (r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0
+                    dist = abs(bcx - rcx) + abs(bcy - rcy)
+                    if best_geo is None or dist < best_geo[0]:
+                        best_geo = (dist, el)
+            if best_geo and best_geo[0] < 240:
+                return best_geo[1]
         return None
     best = None
     for el in elements:

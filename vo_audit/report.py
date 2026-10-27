@@ -423,7 +423,44 @@ def build_report(steps, tree_nodes, visited, out_dir, meta, dom_snapshot=None, v
                 target_s["seq_issues"].append(msg)
     for s in steps:
         if not s.get("dom") and dom_snapshot:
-            s["dom"] = match_dom_element(s.get("utterance"), s.get("label"), dom_snapshot)
+            s["dom"] = match_dom_element(s.get("utterance"), s.get("label"), dom_snapshot, box=s.get("box"))
+        dom_el = s.get("dom")
+        if dom_el:
+            dtag = (dom_el.get("tag") or "").lower()
+            drole = (dom_el.get("role") or "").lower()
+            dhtml = (dom_el.get("html") or "").lower()
+            sutt = (s.get("utterance") or "").strip()
+            sutt_low = sutt.lower()
+            has_vo_trait = bool(
+                re.search(
+                    r"\b(button|bot[oó]n|link|enlace|v[ií]nculo|tab|pestaña|text field|campo de texto|campo de edici[oó]n|toggle|conmutador|adjustable|ajustable|search field)\b",
+                    sutt_low,
+                )
+            )
+            if (drole == "tab" or (dtag == "button" and "pill" in (dom_el.get("id") or ""))) and not has_vo_trait:
+                msg = (
+                    "Nombre accesible (WCAG 4.1.2): pestaña o filtro interactivo (<%s%s>) carece de trait de rol ('Tab' / 'Button') en iOS VoiceOver; anuncia solo «%s»"
+                    % (dtag, (' role="%s"' % drole) if drole else "", sutt[:55])
+                )
+                s.setdefault("seq_issues", [])
+                if msg not in s["seq_issues"]:
+                    s["seq_issues"].append(msg)
+            elif dtag == "input" and 'type="radio"' not in dhtml and not has_vo_trait:
+                msg = (
+                    "Nombre accesible (WCAG 4.1.2): campo de edición (<input>) carece de trait 'Text Field' / 'Campo de texto' en iOS VoiceOver; anuncia solo «%s»"
+                    % sutt[:60]
+                )
+                s.setdefault("seq_issues", [])
+                if msg not in s["seq_issues"]:
+                    s["seq_issues"].append(msg)
+            if dtag == "input" and re.search(r"current investment,\s*0$|inversi[oó]n actual,\s*0$", sutt_low):
+                msg = (
+                    "Tropicalización / i18n (WCAG 3.3.2 / 4.1.2): etiqueta accesible del campo de importe («%s») omite interpolar el saldo/inversión disponible para operar"
+                    % sutt[:60]
+                )
+                s.setdefault("seq_issues", [])
+                if msg not in s["seq_issues"]:
+                    s["seq_issues"].append(msg)
     resolved_view = _resolve_view_info(steps, dom_snapshot, view_info)
     save_steps_json(
         steps, tree_nodes, visited, out_dir, meta, dom_snapshot=dom_snapshot, view_info=resolved_view

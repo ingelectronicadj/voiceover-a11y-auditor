@@ -21,6 +21,7 @@ import tempfile
 import time
 
 from vo_audit import VERSION
+from vo_audit.compare import build_comparison_suite
 from vo_audit.config import LOCAL_CONFIG_PATH, load_config
 from vo_audit.ios_client import IosClient
 from vo_audit.report import build_report, build_suite_index, rebuild_report
@@ -162,12 +163,24 @@ def main():
     ap.add_argument("--refresh", action="store_true", help="refresca la sesión SSO (2 POSTs) antes de auditar")
     ap.add_argument("--keep-alive", type=float, default=None, metavar="SECS", help="renueva la sesión SSO en background cada N segundos")
     ap.add_argument("--test-modals", action="store_true", help="abre y cierra modales detectados para validar Focus Return (VO-FOCUS-001)")
+    ap.add_argument("--allow-skeleton", action="store_true", help="permite auditar un estado skeleton inicial sin esperar auto-recuperación")
+    ap.add_argument(
+        "--compare",
+        nargs=2,
+        metavar=("IOS_DIR", "ANDROID_DIR"),
+        help="genera un reporte HTML comparativo lado a lado entre una vista/suite iOS VoiceOver y Android TalkBack",
+    )
     ap.add_argument("--pack", nargs="?", const="auto", default=None, metavar="ZIP_FILE", help="genera index.html maestro y empaqueta la suite en .zip")
     ap.add_argument("--rebuild", metavar="DIR", help="regenera report.html de una corrida previa")
     args = ap.parse_args()
 
     if args.self_test:
         run_self_test()
+        return
+
+    if args.compare:
+        out_cmp = build_comparison_suite(args.compare[0], args.compare[1], out_path=args.out)
+        print("Reporte comparativo: %s" % out_cmp)
         return
 
     cfg = load_config(

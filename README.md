@@ -1,4 +1,4 @@
-# VoiceOver Audit (`v0.2.0`)
+# VoiceOver Audit (`v0.3.0`)
 
 Herramienta de auditoría lineal de accesibilidad para **iOS VoiceOver** sobre **Xcode / iOS Simulator** - equivalente a **NVDA Speech Viewer / Accessibility Inspector** para aplicaciones **nativas (`UIKit`, `SwiftUI`) e híbridas (`WKWebView`)**.
 
@@ -71,6 +71,7 @@ python3 voiceover_audit.py --devices "iPhone 18 Pro,iPhone XR" --view-title "Wel
 | `--login` / `--refresh` | Ejecuta flujo de autenticación pre-auditoría si está configurado en el perfil | `False` |
 | `--keep-alive SECS` | Intervalo de renovación de sesión en segundo plano (`0` para desactivar) | Según config |
 | `--test-modals` | Abre y cierra modales/drawers detectados para validar `Focus Return` (`VO-FOCUS-001`) | `False` |
+| `--compare IOS_DIR ANDROID_DIR` | Genera un reporte HTML comparativo lado a lado (`VoiceOver` vs `TalkBack`) para una vista o suite completa | - |
 | `--pack [ZIP_FILE]` | Genera portada maestra `index.html` y empaqueta la suite de reportes en un archivo `.zip` | - |
 | `--rebuild DIR` | Reconstruye `report.html` a partir de `steps.json` y las capturas de `DIR/img/` | - |
 
