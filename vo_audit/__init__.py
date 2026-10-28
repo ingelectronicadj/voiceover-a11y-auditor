@@ -1,3 +1,3 @@
-"""Paquete modular de auditoria de accesibilidad con iOS VoiceOver y Xcode."""
+"""vo_audit - Paquete modular para auditoria lineal de accesibilidad con iOS VoiceOver y Xcode."""
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
