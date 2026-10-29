@@ -199,7 +199,7 @@ DOM_EXTRACT_JS = r"""
       html: el.outerHTML.replace(/\s+/g, ' ').slice(0, 300)
     });
   }
-  const bMatch = location.href.match(/\/hybrid\/[^/]+\/([^/]+)\//);
+  const bMatch = location.href.match(/\/hybrid\/(?:packages\/)?[^/]+\/([^/]+)\//);
   const h1Text = (document.querySelector('h1')?.innerText || document.querySelector('h1')?.textContent || '').trim().replace(/\s+/g, ' ');
   const bodyTxt = (document.body?.innerText || '').toLowerCase();
   const hasErrorState = Boolean(document.querySelector('[data-testid*="retry"], [data-testid*="error-page"]')) || /something went wrong|there was a problem loading|tuvimos un problema/i.test(bodyTxt);

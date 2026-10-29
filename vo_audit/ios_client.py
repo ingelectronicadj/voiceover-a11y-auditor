@@ -404,3 +404,54 @@ class IosClient:
             if isinstance(n, dict) and n.get("bounds"):
                 n["bounds"] = tuple(n["bounds"])
         return steps, tree_nodes, visited
+
+
+    def check_and_sync_hybrid_bundle(self, cfg, bundle_id=None, sync_to_sim=True):
+        """Consulta versions.json del CDN híbrido (si está configurado en cfg['hybrid_cdn_url']) y sincroniza en el simulador iOS."""
+        cdn_url = (cfg or {}).get("hybrid_cdn_url", "").strip()
+        if not cdn_url:
+            return None
+        import io, json, os, shutil, ssl, subprocess, urllib.request, zipfile
+        ctx = ssl._create_unverified_context()
+        try:
+            req = urllib.request.Request(cdn_url)
+            res = urllib.request.urlopen(req, context=ctx, timeout=12)
+            last_mod = res.headers.get("Last-Modified", "")
+            raw_bytes = res.read()
+            data = json.loads(raw_bytes.decode("utf-8"))
+            pkgs = data.get("packages") or []
+            pkg_info = pkgs[0] if pkgs else {}
+            ver = pkg_info.get("version") or data.get("version") or ""
+            chk = pkg_info.get("checksum_zip") or ""
+            feat = (cfg or {}).get("hybrid_feature", "crypto")
+            print(f"      [Bundle CDN] url={cdn_url} -> version={ver} | Last-Modified={last_mod} | sha256={chk[:16]}...")
+            if not sync_to_sim or not bundle_id or not ver or not self.udid:
+                return {"version": ver, "last_modified": last_mod, "checksum": chk}
+            cont = subprocess.check_output(
+                ["xcrun", "simctl", "get_app_container", self.udid, bundle_id, "data"],
+                text=True, stderr=subprocess.DEVNULL
+            ).strip()
+            if cont and os.path.isdir(cont):
+                pkg_dir = os.path.join(cont, "Documents", "hybrid", "packages", feat, ver)
+                cat_dir = os.path.join(cont, "Documents", "hybrid", "catalogs")
+                if not os.path.exists(os.path.join(pkg_dir, "index.html")):
+                    base_cdn = cdn_url.rsplit("/", 1)[0]
+                    zip_url = f"{base_cdn}/{ver}/artifact.zip"
+                    print(f"      [Bundle iOS] descargando nuevo paquete {ver} desde {zip_url} ...")
+                    zbytes = urllib.request.urlopen(zip_url, context=ctx, timeout=30).read()
+                    # Remove older versions in packages/<feat>/
+                    feat_root = os.path.join(cont, "Documents", "hybrid", "packages", feat)
+                    if os.path.isdir(feat_root):
+                        shutil.rmtree(feat_root, ignore_errors=True)
+                    os.makedirs(pkg_dir, exist_ok=True)
+                    os.makedirs(cat_dir, exist_ok=True)
+                    with zipfile.ZipFile(io.BytesIO(zbytes)) as zf:
+                        zf.extractall(pkg_dir)
+                    open(os.path.join(cat_dir, f"{feat}.json"), "wb").write(raw_bytes)
+                    print(f"      [Bundle iOS] paquete {ver} sincronizado en {pkg_dir}")
+                else:
+                    print(f"      [Bundle iOS] paquete {ver} ya está al día en el simulador")
+            return {"version": ver, "last_modified": last_mod, "checksum": chk}
+        except Exception as e:
+            print(f"      [Bundle CDN] aviso al consultar/sincronizar {cdn_url}: {e}")
+            return None

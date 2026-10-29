@@ -1,4 +1,4 @@
-# VoiceOver Audit (`v0.4.1`)
+# VoiceOver Audit (`v0.5.0`)
 
 Herramienta de auditoría lineal de accesibilidad para **iOS VoiceOver** sobre **Xcode / iOS Simulator** - equivalente a **NVDA Speech Viewer / Accessibility Inspector** para aplicaciones **nativas (`UIKit`, `SwiftUI`) e híbridas (`WKWebView`)**.
 

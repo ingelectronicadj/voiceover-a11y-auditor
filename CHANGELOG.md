@@ -2,6 +2,13 @@
 
 Todas las mejoras relevantes de la herramienta de auditoría lineal de accesibilidad con iOS VoiceOver y Xcode se registran en este archivo siguiendo [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) y [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.5.0] - 2026-10-29
+
+### Añadido
+- **Verificador y sincronizador automático de paquetes híbridos `--check-bundle` (`voiceover_audit.py`, `vo_audit/ios_client.py`)**:
+  - Consulta el manifiesto remoto `versions.json` (`hybrid_cdn_url`) y actualiza automáticamente `Documents/hybrid/packages/<feature>/<version>/` en el simulador iOS cuando se detecta una nueva versión publicada.
+- **Extracción unificada de versión de bundle (`packages/<feature>/<version>`) y generador de plantilla de bug A11Y de 6 secciones (`vo_audit/rwi.py`, `vo_audit/report.py`)**.
+
 ## [0.4.1] - 2026-10-28
 
 ### Añadido

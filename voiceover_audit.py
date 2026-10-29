@@ -137,6 +137,7 @@ def main():
     ap.add_argument("--version", action="version", version="voiceover_audit %s" % VERSION)
     ap.add_argument("--profile", "-p", metavar="NAME", help="nombre del perfil en profiles/<NAME>.local.json")
     ap.add_argument("--config", metavar="FILE", help="archivo JSON de configuración opcional")
+    ap.add_argument("--check-bundle", action="store_true", help="consulta versions.json del CDN híbrido configurado en el perfil y muestra versión/fecha")
     ap.add_argument("--self-test", action="store_true", help="ejecuta autovalidación interna sin simulador y sale")
     ap.add_argument("--list-sims", action="store_true", help="lista todos los simuladores iOS disponibles en Xcode y sale")
     ap.add_argument("--list-apps", action="store_true", help="lista las apps instaladas en el simulador activo y sale")
@@ -176,6 +177,24 @@ def main():
 
     if args.self_test:
         run_self_test()
+        return
+    if getattr(args, "check_bundle", False):
+        cfg = load_config(args.config, profile=args.profile)
+        cdn = (cfg or {}).get("hybrid_cdn_url", "").strip()
+        if not cdn:
+            print("No hay 'hybrid_cdn_url' configurado en el perfil actual.")
+            return
+        import json, ssl, urllib.request
+        ctx = ssl._create_unverified_context()
+        req = urllib.request.Request(cdn)
+        res = urllib.request.urlopen(req, context=ctx, timeout=12)
+        data = json.loads(res.read().decode("utf-8"))
+        pkgs = data.get("packages") or []
+        pkg = pkgs[0] if pkgs else {}
+        print("[Bundle CDN] URL:           %s" % cdn)
+        print("[Bundle CDN] Version:       %s" % (pkg.get("version") or data.get("version")))
+        print("[Bundle CDN] Last-Modified: %s" % res.headers.get("Last-Modified", ""))
+        print("[Bundle CDN] Checksum:      %s" % pkg.get("checksum_zip", ""))
         return
 
     if args.compare:
