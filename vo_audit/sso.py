@@ -17,8 +17,20 @@ def _post(url, body, headers=None):
 
 def refresh_session(cfg, quiet=False):
     """Ejecuta los 2 POSTs de autenticacion (login + SSO) para refrescar la sesion en backend."""
-    access = json.loads(_post(cfg["login_url"], cfg["login_body"]))["accessToken"]
-    _post(cfg["sso_url"], cfg["sso_body"], {"accesstoken": access})
+    from .doctor import friendly_net_error
+
+    try:
+        access = json.loads(_post(cfg["login_url"], cfg["login_body"]))["accessToken"]
+    except Exception as e:
+        raise RuntimeError(
+            "login SSO falló: %s" % friendly_net_error(e, cfg["login_url"])
+        )
+    try:
+        _post(cfg["sso_url"], cfg["sso_body"], {"accesstoken": access})
+    except Exception as e:
+        raise RuntimeError(
+            "registro SSO falló: %s" % friendly_net_error(e, cfg["sso_url"])
+        )
     if not quiet:
         u = cfg["sso_body"].get("username", "?")
         c = cfg["sso_body"].get("coreUserId", "?")

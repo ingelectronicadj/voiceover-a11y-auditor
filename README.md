@@ -38,6 +38,9 @@ cd voiceover-a11y-auditor
 python3 voiceover_audit.py --version
 python3 voiceover_audit.py --self-test
 
+# 1b. Diagnosticar el entorno (macOS, Xcode/simctl, OCR, app, endpoints/VPN)
+python3 voiceover_audit.py --doctor --profile mi_app
+
 # 2. Listar todos los simuladores iOS disponibles en Xcode
 python3 voiceover_audit.py --list-sims
 
@@ -56,6 +59,7 @@ python3 voiceover_audit.py --devices "iPhone 18 Pro,iPhone XR" --view-title "Wel
 |---|---|---|
 | `--version` | Muestra la versión instalada y termina | - |
 | `--self-test` | Valida sin simulador los 86 criterios WCAG 2.2, las 16 reglas `VO-*` y el generador HTML | - |
+| `--doctor` | Preflight del entorno: macOS, Xcode CLT/simctl, binarios `vo_bridge`/`vo_ocr`, simulador booteado, app instalada y conectividad a los endpoints del perfil (con pista VPN en dominios internos). Sale con código != 0 si hay fallos | - |
 | `--list-sims` | Lista todos los simuladores iOS disponibles en Xcode e indica cuáles están encendidos (`[BOOTED]`) | - |
 | `--list-apps` | Lista todas las apps de usuario instaladas en el simulador activo | - |
 | `--ipa IPA_OR_APP` | Adapta e instala un archivo `.ipa` (o `.app`) en el simulador objetivo | - |
@@ -89,8 +93,9 @@ python3 voiceover_audit.py --devices "iPhone 18 Pro,iPhone XR" --view-title "Wel
 ├── reportes/                  # Salidas organizadas por aplicación/proyecto (ignoradas en git)
 ├── CHANGELOG.md               # Historial de cambios por versión
 ├── vo_audit/
-│   ├── __init__.py            # Versión del paquete (VERSION = "0.2.0")
+│   ├── __init__.py            # Versión del paquete
 │   ├── config.py              # Carga de configuración jerárquica y mapeo de traits UIAccessibility
+│   ├── doctor.py              # Preflight --doctor y diagnóstico de red (probes TCP + pistas VPN)
 │   ├── ios_client.py          # Cliente xcrun simctl, parcheo Mach-O de .ipa y ejecución de vo_bridge
 │   ├── rwi.py                 # Inspector WKWebView DOM / ARIA e IndexedDB vía Safari WebInspector
 │   ├── vision.py              # Correlación geométrica de nodos y OCR de respaldo

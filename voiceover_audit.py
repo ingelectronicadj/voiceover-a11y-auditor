@@ -19,10 +19,12 @@ import os
 import re
 import tempfile
 import time
+from urllib.parse import urlparse
 
 from vo_audit import VERSION
 from vo_audit.compare import build_comparison_suite
 from vo_audit.config import LOCAL_CONFIG_PATH, load_config
+from vo_audit.doctor import check_sso_endpoints, net_hint, run_doctor
 from vo_audit.ios_client import IosClient
 from vo_audit.report import build_report, build_suite_index, rebuild_report
 from vo_audit.rules import is_a11y_relevant, text_a11y_issues
@@ -139,6 +141,7 @@ def main():
     ap.add_argument("--config", metavar="FILE", help="archivo JSON de configuración opcional")
     ap.add_argument("--check-bundle", action="store_true", help="consulta versions.json del CDN híbrido configurado en el perfil y muestra versión/fecha")
     ap.add_argument("--self-test", action="store_true", help="ejecuta autovalidación interna sin simulador y sale")
+    ap.add_argument("--doctor", action="store_true", help="verifica el entorno (macOS, Xcode/simctl, OCR, app, red) y sale")
     ap.add_argument("--list-sims", action="store_true", help="lista todos los simuladores iOS disponibles en Xcode y sale")
     ap.add_argument("--list-apps", action="store_true", help="lista las apps instaladas en el simulador activo y sale")
     ap.add_argument("--ipa", metavar="IPA_OR_APP", help="instala un archivo .ipa (adaptándolo a Simulator en Apple Silicon) o .app en el simulador")
@@ -210,6 +213,10 @@ def main():
         profile=args.profile,
     )
 
+    if args.doctor:
+        print("Perfil activo: %s" % args.profile)
+        raise SystemExit(run_doctor(cfg))
+
     if args.rebuild:
         print("Regenerando reporte desde %s ..." % args.rebuild)
         ocr_bin = None if args.no_ocr else ensure_ocr_binary()
@@ -246,6 +253,15 @@ def main():
 
     ensure_ocr_binary()
     completed_dirs = []
+
+    if args.login or args.refresh:
+        bad_eps = check_sso_endpoints(cfg)
+        if bad_eps:
+            print("\n[ERROR] Endpoints de red inalcanzables (abortando antes de arrancar el simulador):")
+            for key, url, det in bad_eps:
+                print("  - %s (%s): %s" % (urlparse(url).hostname or url, key, det))
+            print("  -> %s" % net_hint(bad_eps[0][1]))
+            raise SystemExit(3)
 
     for dev_target in device_targets:
         ios_client = IosClient(device=dev_target, timeout=cfg["sim_timeout"])

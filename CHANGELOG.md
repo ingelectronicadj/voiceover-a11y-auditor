@@ -2,6 +2,15 @@
 
 Todas las mejoras relevantes de la herramienta de auditoría lineal de accesibilidad con iOS VoiceOver y Xcode se registran en este archivo siguiendo [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) y [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.6.0] - 2026-11-03
+
+### Añadido
+- **`--doctor` y diagnóstico de red accionable (`vo_audit/doctor.py`, `voiceover_audit.py`, `vo_audit/sso.py`)**:
+  - `--doctor` verifica el entorno completo: macOS, Python >= 3.9, `swiftc` (Xcode CLT), binarios `vo_bridge`/`vo_ocr` compilados o compilables, `xcrun simctl`, simulador booteado, app instalada (`get_app_container`) y conectividad TCP a `login_url`/`sso_url`/`hybrid_cdn_url`.
+  - Cada fallo imprime la acción correctiva (p. ej. "requiere VPN corporativa activa" en dominios internos); sale con código distinto de 0 si hay fallos.
+  - `--login` y `--refresh` ejecutan un preflight de red antes de arrancar el simulador y abortan con la causa probable en lugar de colgar en timeouts.
+  - Errores de red traducidos a mensajes útiles en `refresh_session` (DNS -> VPN, timeout -> VPN, refused -> servicio caído, HTTP -> credenciales).
+
 ## [0.5.0] - 2026-10-29
 
 ### Añadido
