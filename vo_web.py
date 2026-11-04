@@ -23,6 +23,8 @@ import argparse
 import datetime
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -30,7 +32,9 @@ import time
 
 from vo_audit import VERSION
 from vo_audit.config import load_config
+from vo_audit.doctor import run_web_doctor
 from vo_audit.report import build_report, save_steps_json
+from vo_audit.rwi import match_dom_element
 from vo_audit.vo_mac import (
     ax_is_trusted,
     bring_app_front,
@@ -84,9 +88,18 @@ def run_self_test():
             "page_title": "Demo", "is_skeleton": False, "box": None,
             "in_overlay": False, "label": "Loading demo page", "screen_change": False,
         }]
-        save_steps_json(steps, [], set(), td, "vo_web self-test")
-        path = build_report(steps, [], set(), td, "vo_web self-test")
+        probes = [{
+            "type": "loading_probe", "network": "Slow 3G", "skeleton_detected": True,
+            "loading_announced": False, "screenshots": ["step_001.png"],
+            "announcements": [{"selector": "screen-reader", "text": "\u200b", "codepoints": ["U+200B"]}],
+            "vo_captions": [], "vo_spoken": False,
+        }]
+        save_steps_json(steps, [], set(), td, "vo_web self-test", probes=probes)
+        path = build_report(steps, [], set(), td, "vo_web self-test", probes=probes)
         assert os.path.exists(path)
+        html_out = open(path, encoding="utf-8").read()
+        assert "sec-probes" in html_out, "Falta sec-probes en report.html de vo_web"
+        assert "VO-STATUS-001" in html_out, "Falta VO-STATUS-001 desde loading_probe"
     print("Self-test OK (v%s): modulos vo_mac/web_client, runner JS y pipeline de reporte verificados." % VERSION)
 
 
@@ -96,6 +109,7 @@ def main():
     ap.add_argument("--profile", "-p", metavar="NAME", help="perfil en profiles/<NAME>.local.json")
     ap.add_argument("--config", metavar="FILE", help="archivo JSON de configuracion opcional")
     ap.add_argument("--self-test", action="store_true", help="autovalidacion interna sin navegador ni VoiceOver")
+    ap.add_argument("--doctor", action="store_true", help="verifica el entorno Web macOS (Python, Node, puppeteer, Chrome, permisos TCC, red) y sale")
     ap.add_argument("--view", metavar="VIEW_ID", help="ID de vista en config['web_views'] (o 'all')")
     ap.add_argument("--url", metavar="URL", help="URL adhoc a auditar (sin login ni cdp_steps)")
     ap.add_argument("--vo-steps", type=int, default=None, help="paradas del barrido VoiceOver (default 40 o segun vista)")
@@ -111,6 +125,9 @@ def main():
         return
 
     cfg = load_config(args.config, profile=args.profile)
+    if args.doctor:
+        print("Perfil activo: %s" % args.profile)
+        raise SystemExit(run_web_doctor(cfg))
     web_views = cfg.get("web_views") or {}
 
     if args.url:
@@ -194,9 +211,25 @@ def main():
                 break
             vres = (results or {}).get(view["id"]) or {}
             probes = vres.get("probes") or []
+            dom_snapshot = vres.get("dom_snapshot")
+            if isinstance(dom_snapshot, dict):
+                dom_snapshot["vo_announcements"] = announcements
+                dom_snapshot["final_announcers"] = vres.get("announcers")
+            if ax_is_trusted():
+                vo_spoke_load = any(re.search(r"load|carg|esper|wait", c.get("text") or "", re.I) for c in announcements)
+                for pr in probes:
+                    if pr.get("type") == "loading_probe":
+                        pr["vo_captions"] = announcements
+                        pr["vo_spoken"] = vo_spoke_load
             print(
-                "      vista lista: url=%s h1=%r announcers=%d probes=%d"
-                % (vres.get("url") or "?", vres.get("h1") or "", len(vres.get("announcers") or []), len(probes))
+                "      vista lista: url=%s h1=%r announcers=%d probes=%d dom_els=%d"
+                % (
+                    vres.get("url") or "?",
+                    vres.get("h1") or "",
+                    len(vres.get("announcers") or []),
+                    len(probes),
+                    len((dom_snapshot or {}).get("elements") or []),
+                )
             )
             if announcements:
                 print("      anuncios capturados en caption durante la carga: %d" % len(announcements))
@@ -217,18 +250,19 @@ def main():
                     png_rel = "img/step_%03d.png" % i
                     png_abs = os.path.join(out_dir, png_rel)
                     capture_window(png_abs)
+                    dom_el = match_dom_element(txt, txt, dom_snapshot) if dom_snapshot else None
                     steps.append({
                         "i": i,
                         "png": png_abs,
                         "node": None,
-                        "dom": None,
+                        "dom": dom_el,
                         "utterance": txt,
                         "raw_caption": txt,
                         "page_title": vres.get("h1") or "",
                         "is_skeleton": False,
                         "box": None,
                         "in_overlay": False,
-                        "label": txt,
+                        "label": (dom_el.get("label") if dom_el else "") or txt,
                         "screen_change": False,
                     })
                     print("      %3d. %s" % (i, (txt or "(sin caption)")[:70]))
@@ -237,6 +271,30 @@ def main():
                         steps.pop()
                         break
                     prev_txt = txt
+            elif probes or dom_snapshot:
+                # En modo --no-sweep crear paso sintetico 1 para anclar hallazgos DOM/probes en report.html
+                step1_png = os.path.join(out_dir, "img", "step_001.png")
+                if not os.path.exists(step1_png):
+                    for pr in probes:
+                        shots = pr.get("screenshots") or []
+                        if shots and os.path.exists(os.path.join(out_dir, "img", shots[0])):
+                            shutil.copy2(os.path.join(out_dir, "img", shots[0]), step1_png)
+                            break
+                h1_lbl = (vres.get("h1") or view["title"] or "Vista Web").strip()
+                steps.append({
+                    "i": 1,
+                    "png": step1_png,
+                    "node": None,
+                    "dom": match_dom_element(h1_lbl, h1_lbl, dom_snapshot) if dom_snapshot else None,
+                    "utterance": "%s, heading level 1" % h1_lbl,
+                    "raw_caption": "%s, heading level 1" % h1_lbl,
+                    "page_title": h1_lbl,
+                    "is_skeleton": False,
+                    "box": None,
+                    "in_overlay": False,
+                    "label": h1_lbl,
+                    "screen_change": False,
+                })
 
             print("[3/3] Generando reporte...")
             meta = "plataforma=macOS VoiceOver + Chrome · url=%s · pasos=%d · %s" % (
@@ -252,13 +310,17 @@ def main():
             }
             save_steps_json(
                 steps, [], set(), out_dir, meta,
-                dom_snapshot={"vo_announcements": announcements, "probes": probes, "final_announcers": vres.get("announcers")},
+                dom_snapshot=dom_snapshot or {"vo_announcements": announcements, "final_announcers": vres.get("announcers")},
                 view_info=view_info,
+                probes=probes,
             )
             ann_path = os.path.join(out_dir, "announcements.json")
             with open(ann_path, "w", encoding="utf-8") as f:
                 json.dump({"vo_captions": announcements, "probes": probes}, f, indent=2, ensure_ascii=False)
-            path = build_report(steps, [], set(), out_dir, meta, view_info=view_info, cfg=cfg)
+            path = build_report(
+                steps, [], set(), out_dir, meta,
+                dom_snapshot=dom_snapshot, view_info=view_info, cfg=cfg, probes=probes,
+            )
             print("Reporte: %s" % path)
             completed.append(out_dir)
     finally:

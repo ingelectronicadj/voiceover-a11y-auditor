@@ -256,27 +256,95 @@ def _rwi_eval(ios_client, js_expr, await_promise=False):
 
 
 def _build_steps_js(cdp_steps):
-    lines = []
+    lines = ["const __vo_probes = [];"]
     for st in cdp_steps or []:
+        if st.get("wait_for_text") or st.get("wait_for_selector") or "wait_for_skeleton" in st:
+            w_cfg = json.dumps({
+                "txt": st.get("wait_for_text"),
+                "sel": st.get("wait_for_selector"),
+                "skel": st.get("wait_for_skeleton"),
+                "timeout_ms": int(float(st.get("timeout_sec", 30)) * 1000),
+            })
+            lines.append(
+                "{ const _w = %s; const _t0 = Date.now(); while (Date.now() - _t0 < _w.timeout_ms) { "
+                "let _ok = false; if (_w.sel) _ok = !!document.querySelector(_w.sel); "
+                "else if (_w.txt) _ok = (document.body?.innerText || '').toLowerCase().includes(_w.txt.toLowerCase()); "
+                "else { const _sc = Array.from(document.querySelectorAll('[class*=\"skeleton\" i], [data-testid*=\"skeleton\" i], [aria-busy=\"true\"]')).filter(e => { const r = e.getBoundingClientRect(); return r.height > 2 && r.width > 2; }).length; _ok = _w.skel ? _sc > 0 : _sc === 0; } "
+                "if (_ok) break; await new Promise(r => setTimeout(r, 400)); } }" % w_cfg
+            )
         if st.get("hash"):
             lines.append("location.hash = %s;" % json.dumps(st["hash"]))
-        elif st.get("click"):
-            sel = json.dumps(st["click"])
+        elif st.get("spa_path"):
+            p = json.dumps(st["spa_path"])
+            lines.append(
+                "{ const _prev = (document.querySelector('main h1, h1')?.innerText || '').trim(); "
+                "const _cb = document.querySelector('[role=\"dialog\"] button[aria-label=\"Close\"], [role=\"dialog\"] button[data-testid=\"close-button\"]'); if (_cb) _cb.click(); "
+                "window.history.pushState({}, '', %s); window.dispatchEvent(new PopStateEvent('popstate')); "
+                "for (let _w = 0; _w < 10; _w++) { await new Promise(r => setTimeout(r, 700)); const _h = (document.querySelector('main h1, h1')?.innerText || '').trim(); if (_h && _h !== _prev) break; } }" % p
+            )
+        elif st.get("click") or st.get("click_selector"):
+            sel = json.dumps(st.get("click") or st.get("click_selector"))
             lines.append(
                 "{ const el = document.querySelector(%s); if (el) el.click(); }" % sel
             )
         elif st.get("click_text"):
             txt = json.dumps(st["click_text"])
-            tag = json.dumps(st.get("tag", "button,a"))
             lines.append(
-                "{ const t = %s.toLowerCase(); const el = Array.from(document.querySelectorAll(%s)).find(e => (e.innerText || e.textContent || e.getAttribute('aria-label') || '').toLowerCase().includes(t)); if (el) el.click(); }"
-                % (txt, tag)
+                "{ const needle = %s.toLowerCase(); "
+                "const openDlg = Array.from(document.querySelectorAll('[role=\"dialog\"]')).find(d => d.getBoundingClientRect().width > 50); "
+                "const root = openDlg || document.querySelector('main') || document.body; "
+                "const cands = Array.from(root.querySelectorAll('a, button, [role=\"tab\"], [role=\"button\"], label, [data-testid=\"selector-row\"], p, span')); "
+                "for (const el of cands) { const t = ((el.innerText || '') + ' ' + (el.getAttribute('aria-label') || '')).trim().toLowerCase(); "
+                "if (t === needle || t.includes(needle)) { let target = el.closest('a, button, [role=\"button\"], [role=\"tab\"], [role=\"combobox\"], [data-testid=\"selector-row\"]'); "
+                "if (!target && el.tagName === 'LABEL') target = (el.htmlFor && document.getElementById(el.htmlFor)) || (el.id && root.querySelector('[aria-labelledby~=\"' + el.id + '\"]')); "
+                "(target || el).click(); break; } } }" % txt
+            )
+        elif st.get("type_selector"):
+            sel = json.dumps(st["type_selector"])
+            val = json.dumps(str(st.get("text") or ""))
+            lines.append(
+                "{ const el = document.querySelector(%s); if (el) { el.focus(); const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set; "
+                "if (setter) setter.call(el, %s); else el.value = %s; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); } }" % (sel, val, val)
             )
         elif st.get("eval"):
             lines.append("{ %s }" % st["eval"])
         wait_ms = int(float(st.get("wait_sec", 2.0)) * 1000)
         if wait_ms > 0:
             lines.append("await new Promise(r => setTimeout(r, %d));" % wait_ms)
+        if st.get("loading_probe"):
+            lp = st["loading_probe"] if isinstance(st["loading_probe"], dict) else {}
+            w_ms = int(lp.get("watch_ms", 15000))
+            lines.append(
+                "{ const _pr = { type: 'loading_probe', network: 'RWI-poll', announcements: [], skeleton_detected: false, screenshots: [], loading_announced: false }; "
+                "const _seen = {}; const _t0 = Date.now(); while (Date.now() - _t0 < %d) { "
+                "document.querySelectorAll('[role=\"status\"], [aria-live]').forEach(el => { const txt = el.textContent || ''; const sel = el.getAttribute('data-testid') || el.getAttribute('role') || el.tagName; const k = sel + '|' + txt; "
+                "if (!_seen[k]) { _seen[k] = 1; _pr.announcements.push({ selector: sel, text: txt, codepoints: Array.from(txt).map(c => 'U+' + c.codePointAt(0).toString(16).toUpperCase()) }); } "
+                "const cl = txt.replace(/\\u200B/g, '').trim(); if (cl.length > 1 && /load|carg|esper|wait/i.test(cl)) _pr.loading_announced = true; }); "
+                "const _sc = Array.from(document.querySelectorAll('[class*=\"skeleton\" i], [data-testid*=\"skeleton\" i], [aria-busy=\"true\"]')).filter(e => { const r = e.getBoundingClientRect(); return r.height > 2 && r.width > 2; }).length; "
+                "if (_sc > 0) _pr.skeleton_detected = true; if (_pr.skeleton_detected && _sc === 0) break; await new Promise(r => setTimeout(r, 350)); } __vo_probes.push(_pr); }" % w_ms
+            )
+        if st.get("probe_control"):
+            lbl = json.dumps(st["probe_control"])
+            w_ms = int(float(st.get("wait_sec", 2.0)) * 1000)
+            lines.append(
+                "{ const needle = %s.toLowerCase(); const openDlg = Array.from(document.querySelectorAll('[role=\"dialog\"]')).find(d => d.getBoundingClientRect().width > 50); "
+                "const searchRoot = openDlg || document.querySelector('main') || document.body; "
+                "const cands = Array.from(searchRoot.querySelectorAll('a, button, [role=\"tab\"], [role=\"button\"], label, [data-testid=\"selector-row\"], p, span')); "
+                "for (const el of cands) { const t = ((el.innerText || '') + ' ' + (el.getAttribute('aria-label') || '')).trim().toLowerCase(); "
+                "if (t === needle || t.includes(needle)) { let target = el.closest('a, button, [role=\"button\"], [role=\"tab\"], [role=\"combobox\"], [data-testid=\"selector-row\"]'); "
+                "if (!target && el.tagName === 'LABEL') target = (el.htmlFor && document.getElementById(el.htmlFor)) || (el.id && searchRoot.querySelector('[aria-labelledby~=\"' + el.id + '\"]')); "
+                "(target || el).click(); break; } } await new Promise(r => setTimeout(r, %d)); "
+                "const dlg = document.querySelector('[role=\"dialog\"]'); let root = dlg || document; "
+                "let listbox = root.querySelector('[role=\"listbox\"], [role=\"radiogroup\"], [role=\"menu\"], [role=\"grid\"], [role=\"tree\"]'); "
+                "if (!listbox && dlg) { root = document; listbox = document.querySelector('[role=\"listbox\"], [role=\"radiogroup\"], [role=\"menu\"], [role=\"grid\"], [role=\"tree\"]'); } "
+                "const trig = Array.from(root.querySelectorAll('button, [role=\"button\"], [role=\"combobox\"]')).find(e => e.getAttribute('aria-expanded') === 'true'); "
+                "const opts = Array.from(root.querySelectorAll('[role=\"option\"], [role=\"radio\"], [role=\"menuitemradio\"], [role=\"menuitemcheckbox\"], [role=\"gridcell\"], [role=\"row\"] > *')).slice(0, 60).map(o => ({ role: o.getAttribute('role') || o.tagName.toLowerCase(), text: (o.innerText || '').trim().slice(0, 60), ariaLabel: o.getAttribute('aria-label') || '', selected: o.getAttribute('aria-selected') ?? o.getAttribute('aria-checked'), disabled: o.getAttribute('aria-disabled') })); "
+                "const emptyDayCells = opts.filter(o => /empty day/i.test(o.ariaLabel || '')).length; "
+                "const dump = { trigger_expanded: trig ? (trig.getAttribute('aria-label') || (trig.innerText || '').trim().slice(0, 50)) : null, trigger_haspopup: trig ? trig.getAttribute('aria-haspopup') : null, container_role: listbox ? listbox.getAttribute('role') : null, container_label: listbox ? (listbox.getAttribute('aria-label') || listbox.getAttribute('aria-labelledby') || '') : null, option_count: opts.length, options: opts, empty_day_cells: emptyDayCells }; "
+                "const _pr = { type: 'probe_control', control: %s, screenshots: [], structure: dump }; "
+                "if (emptyDayCells > 0) _pr.potential_issue = 'Grid padding cells announce \"' + emptyDayCells + 'x empty day\" via aria-label (WCAG 4.1.2: decorative cells should be empty or aria-hidden)'; "
+                "__vo_probes.push(_pr); }" % (lbl, w_ms, lbl)
+            )
     return "\n  ".join(lines)
 
 
@@ -308,8 +376,8 @@ def capture_webview_dom(ios_client, cdp_steps=None, allow_skeleton=False):
   }
   try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch(e) {}"""
     if steps_code or auto_heal_js:
-        combined_js = "(async () => {\n  %s\n  %s\n  return await %s;\n})()" % (
-            steps_code,
+        combined_js = "(async () => {\n  %s\n  %s\n  const __dom = await %s;\n  if (__dom && typeof __vo_probes !== 'undefined' && __vo_probes.length) __dom.probes = __vo_probes;\n  return __dom;\n})()" % (
+            steps_code or "const __vo_probes = [];",
             auto_heal_js,
             DOM_EXTRACT_JS.strip(),
         )

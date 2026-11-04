@@ -11,6 +11,8 @@ import subprocess
 import sys
 import tempfile
 
+from .rwi import DOM_EXTRACT_JS
+
 
 def find_chrome_binary(cfg):
     path = (cfg or {}).get("chrome_path") or os.environ.get("CHROME_PATH") or ""
@@ -216,7 +218,7 @@ async function finishLoadingProbe(page, st, outDir) {
       for (const a of stt.announcers) {
         const k = a.selector + '|' + a.text;
         if (!seen[k]) { seen[k] = a; probe.announcements.push({ selector: a.selector, text: a.text, codepoints: a.codepoints }); }
-        const clean = (a.text || '').replace(/​/g, '').trim();
+        const clean = (a.text || '').replace(/\u200B/g, '').trim();
         if (clean.length > 1 && /load|carg|esper|wait/i.test(clean)) probe.loading_announced = true;
       }
       if (stt.skeletonCount > 0) {
@@ -229,7 +231,7 @@ async function finishLoadingProbe(page, st, outDir) {
           console.log('      [loading_probe] skeleton visible (' + stt.skeletonCount + ' nodos) -> ' + pngName + '_skeleton.png');
         }
         if (!announcerPng && cfg.make_announcer_visible) {
-          const loadingTxt = (stt.announcers.find(a => (a.text || '').replace(/​/g, '').trim().length > 1) || {}).text || '';
+          const loadingTxt = (stt.announcers.find(a => (a.text || '').replace(/\u200B/g, '').trim().length > 1) || {}).text || '';
           if (loadingTxt) {
             await page.evaluate(() => {
               const el = document.querySelector('span[data-testid="screen-reader"], [role="status"], [aria-live]');
@@ -325,6 +327,7 @@ async function runControlProbe(page, st, outDir) {
 }
 
 async function runViewSteps(page, steps, outDir) {
+  let lastTransitionFocusIssue = '';
   const probes = [];
   for (const st of (steps || [])) {
     if (st.wait_for_text || st.wait_for_selector || st.wait_for_skeleton !== undefined) {
@@ -388,8 +391,12 @@ async function runViewSteps(page, steps, outDir) {
         for (const el of cands) {
           const t = ((el.innerText || '') + ' ' + (el.getAttribute('aria-label') || '')).trim().toLowerCase();
           if (t === needle || t.includes(needle)) {
-            const target = el.closest('a, button, [role="button"], [role="tab"], label, [data-testid="selector-row"]') || el;
-            target.click();
+            let target = el.closest('a, button, [role="button"], [role="tab"], [role="combobox"], [data-testid="selector-row"]');
+            if (!target && el.tagName === 'LABEL') {
+              target = (el.htmlFor && document.getElementById(el.htmlFor))
+                || (el.id && searchRoot.querySelector('[aria-labelledby~="' + el.id + '"]'));
+            }
+            (target || el).click();
             return true;
           }
         }
@@ -400,6 +407,14 @@ async function runViewSteps(page, steps, outDir) {
     if (st.type_selector) {
       await page.click(st.type_selector, { clickCount: 3 }).catch(() => {});
       await page.keyboard.press('Backspace').catch(() => {});
+      await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (el && el.value && el.value !== '0') {
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+          if (setter) setter.call(el, '');
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }, st.type_selector).catch(() => {});
       await page.type(st.type_selector, String(st.text || ''), { delay: 18 }).catch(() => {});
     }
     if (st.eval) {
@@ -412,8 +427,27 @@ async function runViewSteps(page, steps, outDir) {
     if (st.probe_control) {
       probes.push(await runControlProbe(page, st, outDir));
     }
+    if (st.click_text && /^(next|confirm|back|continue|read documentation)$/i.test(st.click_text.trim())) {
+      const fCheck = await page.evaluate(() => {
+        const ae = document.activeElement;
+        const h = document.querySelector('main h2, main h1');
+        const hTxt = h ? (h.innerText || '').trim() : '';
+        if (!ae || ae === document.body) {
+          return { bad: false, hTxt, aeTxt: 'BODY' };
+        }
+        const tag = ae.tagName.toLowerCase();
+        const aeTxt = (ae.getAttribute('aria-label') || ae.innerText || '').replace(/\s+/g, ' ').trim();
+        const r = ae.getBoundingClientRect();
+        const hr = h ? h.getBoundingClientRect() : { bottom: 200 };
+        const stayedOnFooterBtn = (tag === 'button' && r.top > hr.bottom + 120);
+        return { bad: stayedOnFooterBtn, hTxt, aeTxt: tag + ' "' + aeTxt.slice(0, 45) + '"' };
+      }).catch(() => ({ bad: false }));
+      if (fCheck.bad) {
+        lastTransitionFocusIssue = 'Orden del foco en transición SPA (WCAG 2.4.3): tras avanzar a «' + (fCheck.hTxt || 'nueva vista') + '», el foco permaneció en el botón inferior (' + fCheck.aeTxt + ') en lugar de moverse al inicio de la nueva vista';
+      }
+    }
   }
-  return probes;
+  return { focusIssue: lastTransitionFocusIssue, probes };
 }
 
 (async () => {
@@ -464,17 +498,27 @@ async function runViewSteps(page, steps, outDir) {
   for (const v of job.views) {
     console.log('      [VO Web] preparando vista "' + v.title + '" ...');
     fs.mkdirSync(path.join(v.out_dir, 'img'), { recursive: true });
-    const probes = await runViewSteps(page, v.cdp_steps || [], v.out_dir);
+    const viewStepRes = await runViewSteps(page, v.cdp_steps || [], v.out_dir);
+    const probes = viewStepRes.probes;
+    const spaFocusIssue = viewStepRes.focusIssue;
     await applyKeepAlive(page);
+    for (let sk = 0; sk < 6; sk++) {
+      const hasSkel = await page.evaluate(() => !!document.querySelector('[aria-busy="true"], [data-testid*="skeleton"]')).catch(() => false);
+      if (!hasSkel) break;
+      await sleep(900);
+    }
+    const rawDom = job.dom_extract_js ? await page.evaluate(job.dom_extract_js).catch(() => null) : null;
+    const domSnapshot = (typeof rawDom === 'string') ? JSON.parse(rawDom) : rawDom;
+    if (domSnapshot && spaFocusIssue) domSnapshot.spaFocusIssue = spaFocusIssue;
     const finalState = await page.evaluate(announcerStateJS()).catch(() => null);
     results[v.id] = {
       url: page.url(),
       title: v.title,
       h1: finalState ? finalState.h1 : '',
       announcers: finalState ? finalState.announcers : [],
+      dom_snapshot: domSnapshot,
       probes
     };
-    // Solo la primera vista por ahora (la sesion VO opera sobre la ventana visible)
     if (job.views.length > 1) continue;
   }
 
@@ -514,6 +558,7 @@ class WebClient:
             "locale": self.cfg.get("locale") or "en-US",
             "viewport_width": int(self.cfg.get("viewport_width", 1440)),
             "viewport_height": int(self.cfg.get("viewport_height", 900)),
+            "dom_extract_js": DOM_EXTRACT_JS,
             "views": views_payload,
             "out_json": self.out_json,
         }

@@ -79,11 +79,27 @@ def run_self_test():
     ]
     with tempfile.TemporaryDirectory() as tmpdir:
         os.makedirs(os.path.join(tmpdir, "img"), exist_ok=True)
-        out_html = build_report(sample_steps, [], set(), tmpdir, "self-test")
+        sample_probes = [
+            {
+                "type": "loading_probe", "network": "Slow 3G",
+                "skeleton_detected": True, "loading_announced": False,
+                "screenshots": ["step_001.png"],
+                "announcements": [{"selector": "screen-reader", "text": "\u200b", "codepoints": ["U+200B"]}],
+            },
+            {
+                "type": "probe_control", "control": "Calendar",
+                "screenshots": [], "structure": {"container_role": "grid", "option_count": 7, "options": []},
+                "potential_issue": 'Grid padding cells announce "12x empty day" via aria-label (WCAG 4.1.2)',
+            },
+        ]
+        out_html = build_report(sample_steps, [], set(), tmpdir, "self-test", probes=sample_probes)
         content = open(out_html, encoding="utf-8").read()
         assert "VO-SKEL-001" in content, "Falta detección VO-SKEL-001 en self-test"
         assert "VO-FOCUS-001" in content, "Falta detección VO-FOCUS-001 en self-test"
         assert "VO-I18N-001" in content, "Falta detección VO-I18N-001 en self-test"
+        assert "VO-STATUS-001" in content, "Falta detección VO-STATUS-001 desde loading_probe"
+        assert "VO-NAME-001" in content, "Falta detección VO-NAME-001 desde probe_control"
+        assert "sec-probes" in content, "Falta sección sec-probes en report.html"
     print("Self-test OK (v%s): 86 criterios WCAG 2.2, %d reglas VO-* y generador HTML verificados." % (
         VERSION, len(WCAG_CATALOG)
     ))

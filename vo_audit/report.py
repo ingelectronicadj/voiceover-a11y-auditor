@@ -377,12 +377,13 @@ def _resolve_view_info(steps, dom_snapshot, view_info=None):
     }
 
 
-def save_steps_json(steps, tree_nodes, visited, out_dir, meta, dom_snapshot=None, view_info=None):
+def save_steps_json(steps, tree_nodes, visited, out_dir, meta, dom_snapshot=None, view_info=None, probes=None):
     data = {
         "version": VERSION,
         "meta": meta,
         "view_info": view_info,
         "dom_snapshot": dom_snapshot,
+        "probes": probes or [],
         "steps": [
             {
                 "i": s["i"],
@@ -409,7 +410,9 @@ def save_steps_json(steps, tree_nodes, visited, out_dir, meta, dom_snapshot=None
     return p
 
 
-def build_report(steps, tree_nodes, visited, out_dir, meta, dom_snapshot=None, view_info=None, cfg=None):
+def build_report(steps, tree_nodes, visited, out_dir, meta, dom_snapshot=None, view_info=None, cfg=None, probes=None):
+    if probes is None and isinstance(dom_snapshot, dict) and dom_snapshot.get("probes"):
+        probes = dom_snapshot.get("probes")
     tree_nodes = [n for n in tree_nodes if is_a11y_relevant(n)]
     analyze_sequence_issues(steps)
     headings_outline, head_issues = analyze_heading_hierarchy(dom_snapshot, steps)
@@ -461,6 +464,35 @@ def build_report(steps, tree_nodes, visited, out_dir, meta, dom_snapshot=None, v
                 s.setdefault("seq_issues", [])
                 if msg not in s["seq_issues"]:
                     s["seq_issues"].append(msg)
+            dlbl = (dom_el.get("label") or "").strip()
+            m_tk = re.match(r"^([0-9.,]+)\s+([A-Z]{3,5})$", dlbl)
+            if m_tk and sutt == m_tk.group(1):
+                msg_tk = (
+                    "Información y relaciones (WCAG 1.3.1 / 3.3.2): VoiceOver anuncia únicamente la cifra («%s») omitiendo la unidad/ticker monetario («%s») visible en pantalla"
+                    % (sutt, m_tk.group(2))
+                )
+                s.setdefault("seq_issues", [])
+                if msg_tk not in s["seq_issues"]:
+                    s["seq_issues"].append(msg_tk)
+    if probes and steps:
+        for pr in probes:
+            ptype = pr.get("type")
+            if ptype == "loading_probe":
+                if pr.get("skeleton_detected") and not pr.get("loading_announced"):
+                    msg_lp = "Mensajes de estado (WCAG 4.1.3): loading_probe detectó estado skeleton visible sin anuncio 'Loading' en regiones [role='status']/[aria-live]"
+                    steps[0].setdefault("seq_issues", [])
+                    if msg_lp not in steps[0]["seq_issues"]:
+                        steps[0]["seq_issues"].append(msg_lp)
+                elif pr.get("loading_announced") and pr.get("vo_spoken") is False:
+                    msg_vo = "Mensajes de estado (WCAG 4.1.3): el DOM emitió el anuncio de carga en [role='status'], pero VoiceOver macOS no lo verbalizó en el panel de caption"
+                    steps[0].setdefault("seq_issues", [])
+                    if msg_vo not in steps[0]["seq_issues"]:
+                        steps[0]["seq_issues"].append(msg_vo)
+            elif ptype == "probe_control" and pr.get("potential_issue"):
+                msg_pc = "Nombre accesible (WCAG 4.1.2): %s" % pr["potential_issue"]
+                steps[0].setdefault("seq_issues", [])
+                if msg_pc not in steps[0]["seq_issues"]:
+                    steps[0]["seq_issues"].append(msg_pc)
     if isinstance(dom_snapshot, dict):
         spa_fi = (dom_snapshot.get("spaFocusIssue") or "").strip()
         if spa_fi and steps:
@@ -512,7 +544,7 @@ def build_report(steps, tree_nodes, visited, out_dir, meta, dom_snapshot=None, v
                     target_st["seq_issues"].append(msg)
     resolved_view = _resolve_view_info(steps, dom_snapshot, view_info)
     save_steps_json(
-        steps, tree_nodes, visited, out_dir, meta, dom_snapshot=dom_snapshot, view_info=resolved_view
+        steps, tree_nodes, visited, out_dir, meta, dom_snapshot=dom_snapshot, view_info=resolved_view, probes=probes
     )
     cards, film_nodes, all_issues = [], [], []
     by_rule = {}
@@ -1041,6 +1073,106 @@ def build_report(steps, tree_nodes, visited, out_dir, meta, dom_snapshot=None, v
             )
         )
 
+    # Construir sección de Probes dinámicos (loading_probe / probe_control ejecutados en cdp_steps)
+    probes_section_html = ""
+    if probes:
+        probe_cards = []
+        for pr in probes:
+            ptype = pr.get("type") or "probe"
+            shots = pr.get("screenshots") or []
+            shots_html = " ".join(
+                '<a href="img/%s" target="_blank" rel="noopener"><img src="img/%s" style="max-width:260px;border:1px solid #334155;border-radius:6px;margin:4px" alt="%s"></a>'
+                % (html.escape(s), html.escape(s), html.escape(s))
+                for s in shots
+            )
+            if ptype == "loading_probe":
+                ann_rows = "".join(
+                    "<tr><td><code>%s</code></td><td>%s</td><td class='muted'>%s</td></tr>"
+                    % (
+                        html.escape(str(a.get("selector") or "")),
+                        html.escape(repr(a.get("text") or "")[:80]),
+                        html.escape(" ".join(a.get("codepoints") or [])),
+                    )
+                    for a in pr.get("announcements") or []
+                ) or "<tr><td colspan='3' class='muted'>Sin anuncios capturados en la transición.</td></tr>"
+                vo_cap_html = ""
+                if "vo_captions" in pr:
+                    vc_list = pr.get("vo_captions") or []
+                    vc_rows = "".join(
+                        "<tr><td class='muted'>t=%.2fs</td><td>%s</td></tr>"
+                        % (float(c.get("t", 0)), html.escape(str(c.get("text") or "")[:90]))
+                        for c in vc_list
+                    ) or "<tr><td colspan='2' class='muted'>VoiceOver no emitió texto en el panel de caption durante la carga.</td></tr>"
+                    vo_pill = (
+                        '<span class="state-pill ok">Verbalizado por VoiceOver</span>'
+                        if pr.get("vo_spoken")
+                        else '<span class="state-pill warn">No verbalizado en caption de VoiceOver</span>'
+                    )
+                    vo_cap_html = (
+                        '<div style="margin-top:8px"><b>Panel de caption de VoiceOver macOS:</b> %s</div>'
+                        '<div class="table-wrap"><table><thead><tr><th>Tiempo</th><th>Caption VoiceOver</th></tr></thead><tbody>%s</tbody></table></div>'
+                        % (vo_pill, vc_rows)
+                    )
+                status_pill = (
+                    '<span class="state-pill ok">Loading anunciado en DOM</span>'
+                    if pr.get("loading_announced")
+                    else '<span class="state-pill warn">Skeleton sin anuncio "Loading" (WCAG 4.1.3)</span>'
+                    if pr.get("skeleton_detected")
+                    else '<span class="state-pill muted">Skeleton no detectado</span>'
+                )
+                probe_cards.append(
+                    '<div class="rule-card info"><b>loading_probe</b> · red emulada: %s<br>'
+                    "Skeleton detectado: %s · %s<br>"
+                    '<div class="table-wrap"><table><thead><tr><th>Region</th><th>Texto anunciado</th><th>Codepoints</th></tr></thead><tbody>%s</tbody></table></div>'
+                    "%s%s</div>"
+                    % (
+                        html.escape(str(pr.get("network") or "?")),
+                        "sí" if pr.get("skeleton_detected") else "no",
+                        status_pill,
+                        ann_rows,
+                        vo_cap_html,
+                        shots_html,
+                    )
+                )
+            elif ptype == "probe_control":
+                stc = pr.get("structure") or {}
+                opt_rows = "".join(
+                    "<tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+                    % (
+                        html.escape(str(o.get("role") or "")),
+                        html.escape((o.get("text") or "")[:45]),
+                        html.escape((o.get("ariaLabel") or "")[:55]),
+                        html.escape(str(o.get("selected") if o.get("selected") is not None else "")),
+                        html.escape(str(o.get("disabled") if o.get("disabled") is not None else "")),
+                    )
+                    for o in (stc.get("options") or [])[:25]
+                ) or "<tr><td colspan='5' class='muted'>Sin opciones/nodos capturados.</td></tr>"
+                issue_html = (
+                    '<div class="flag">%s</div>' % html.escape(pr["potential_issue"])
+                    if pr.get("potential_issue")
+                    else ""
+                )
+                probe_cards.append(
+                    '<div class="rule-card info"><b>probe_control</b> · control: «%s»<br>'
+                    "Trigger expandido: %s · contenedor: %s (%s) · %d nodos%s"
+                    '<div class="table-wrap"><table><thead><tr><th>Role</th><th>Texto</th><th>aria-label</th><th>selected</th><th>disabled</th></tr></thead><tbody>%s</tbody></table></div>'
+                    "%s</div>"
+                    % (
+                        html.escape(str(pr.get("control") or "")),
+                        html.escape(str(stc.get("trigger_expanded") or "n/d")),
+                        html.escape(str(stc.get("container_role") or "n/d")),
+                        html.escape(str(stc.get("container_label") or "")),
+                        int(stc.get("option_count") or 0),
+                        issue_html,
+                        opt_rows,
+                        shots_html,
+                    )
+                )
+        probes_section_html = (
+            '<h2 id="sec-probes"><span>Sondas dinámicas de interacción (probes)</span>'
+            "<span>%d probe(s) ejecutados</span></h2>%s" % (len(probes), "\n".join(probe_cards))
+        )
+
     # Construir Mapa de jerarquía de encabezados (Outline H1-H6) y tabla de Elementos Omitidos (VO-UNREACH-001)
     headings_section_html = ""
     if headings_outline:
@@ -1228,6 +1360,8 @@ def build_report(steps, tree_nodes, visited, out_dir, meta, dom_snapshot=None, v
 
 %(po_section_html)s
 
+%(probes_section_html)s
+
 <h2 id="sec-flujo"><span>Mapa de secuencia lineal (pasos únicos)</span><span>clic para saltar al paso</span></h2>
 <div class="filmstrip">%(film)s</div>
 
@@ -1337,6 +1471,7 @@ qInput.addEventListener('input',applyFilter);
         "headings_section_html": headings_section_html,
         "unreach_section_html": unreach_section_html,
         "po_section_html": po_section_html,
+        "probes_section_html": probes_section_html,
         "film": "\n".join(film_nodes),
         "cards": "\n".join(cards),
         "tree_rows": "\n".join(tree_rows),
@@ -1351,7 +1486,7 @@ def rebuild_report(ocr_bin, out_dir, view_info=None, cfg=None):
     """Regenera report.html de una corrida previa: usa steps.json si existe y re-ejecuta OCR + heurísticas."""
     json_path = os.path.join(out_dir, "steps.json")
     saved_by_i = {}
-    tree_nodes, visited, orig_meta, dom_snapshot, saved_view_info = [], set(), "", None, None
+    tree_nodes, visited, orig_meta, dom_snapshot, saved_view_info, saved_probes = [], set(), "", None, None, None
     if os.path.exists(json_path):
         try:
             with open(json_path, "r", encoding="utf-8") as f:
@@ -1359,6 +1494,7 @@ def rebuild_report(ocr_bin, out_dir, view_info=None, cfg=None):
             orig_meta = saved.get("meta", "")
             saved_view_info = saved.get("view_info")
             dom_snapshot = saved.get("dom_snapshot")
+            saved_probes = saved.get("probes")
             tree_nodes = saved.get("tree_nodes", [])
             visited = {
                 (k[0], k[1], k[2], tuple(k[3]) if k[3] else None)
@@ -1425,7 +1561,7 @@ def rebuild_report(ocr_bin, out_dir, view_info=None, cfg=None):
         % (len(steps), datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
     )
     return build_report(
-        steps, tree_nodes, visited, out_dir, meta, dom_snapshot=dom_snapshot, view_info=view_info, cfg=cfg
+        steps, tree_nodes, visited, out_dir, meta, dom_snapshot=dom_snapshot, view_info=view_info, cfg=cfg, probes=saved_probes
     )
 
 
@@ -1563,7 +1699,7 @@ def build_suite_index(out_dirs, suite_dir=None, zip_path=None, suite_title=None)
                 img_src = os.path.join(d, "img")
                 if os.path.isdir(img_src):
                     for fn in sorted(os.listdir(img_src)):
-                        if fn.startswith("step_") and fn.endswith(".png"):
+                        if fn.endswith(".png"):
                             shutil.copy2(os.path.join(img_src, fn), os.path.join(dst_d, "img", fn))
                 old_rel = os.path.relpath(os.path.join(d, "report.html"), suite_dir)
                 new_rel = "%s/report.html" % sub_name

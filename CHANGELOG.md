@@ -2,6 +2,17 @@
 
 Todas las mejoras relevantes de la herramienta de auditoría lineal de accesibilidad con iOS VoiceOver y Xcode se registran en este archivo siguiendo [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) y [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.7.1] - 2026-11-04
+
+### Añadido
+- **Integración completa de DOM, `probes` y `--doctor` en `vo_web.py` (`vo_audit/web_client.py`, `vo_audit/report.py`, `vo_audit/doctor.py`)**:
+  - `vo_audit/web_client.py` evalúa `DOM_EXTRACT_JS` tras los `cdp_steps` y verifica `spaFocusIssue` (WCAG 2.4.3), habilitando en `vo_web.py` la correlación de pasos con el DOM (`match_dom_element`), el mapa de encabezados (`sec-headings`), la tabla de elementos omitidos (`VO-UNREACH-001`) y la auditoría de diccionario `IndexedDB` (`sec-i18n`).
+  - `vo_audit/report.py` renderiza la sección `sec-probes` con capturas, anuncios DOM con codepoints y la tabla de **captions reales verbalizados por VoiceOver macOS** (`vo_captions` / `vo_spoken`), e inyecta automáticamente hallazgos `VO-STATUS-001` (WCAG 4.1.3) y `VO-NAME-001` (WCAG 4.1.2) cuando una sonda detecta un defecto.
+  - `vo_web.py --doctor` verifica macOS, Python, permisos TCC (`Accesibilidad` y `Grabación de Pantalla`), Node.js, `puppeteer`, Chrome y conectividad de red.
+- **Paridad de `cdp_steps` / `rwi_steps` en iOS (`vo_audit/rwi.py`)**: añade soporte de `spa_path`, `click_selector`, `type_selector`, `wait_for_text`, `wait_for_selector`, `wait_for_skeleton`, `loading_probe`, `probe_control` y resolución `<label>` -> `[role="combobox"]` via `htmlFor`/`aria-labelledby`.
+- **Reintentos con backoff en SSO (`vo_audit/sso.py`)**: `_post()` reintenta hasta 2 veces con espera progresiva (3s/6s) ante microcortes de VPN.
+- **Soporte de `macOS VoiceOver` en `--compare` (`vo_audit/compare.py`)** y copia de todas las imágenes `.png` de `img/` al empaquetar con `--pack` (`vo_audit/report.py`).
+
 ## [0.7.0] - 2026-11-04
 
 ### Añadido

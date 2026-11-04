@@ -188,3 +188,103 @@ def run_doctor(cfg, ios_client=None):
 
     print("\nResultado: %d fallo(s), %d aviso(s)" % (fails[0], warns[0]))
     return fails[0]
+
+
+_PUPPETEER_CHECK_JS = r"""
+const path = require('path');
+const cands = [
+  path.join(process.env.HOME || '', '.npm-global/lib/node_modules/pa11y/node_modules/puppeteer'),
+  '/usr/local/lib/node_modules/pa11y/node_modules/puppeteer',
+  path.join(process.env.APPDATA || '', 'npm/node_modules/pa11y/node_modules/puppeteer'),
+  path.join(process.env.APPDATA || '', 'npm/node_modules/puppeteer'),
+  path.join(process.env.NPM_CONFIG_PREFIX || '', 'lib/node_modules/puppeteer'),
+  'puppeteer'
+];
+for (const c of cands) {
+  try { require(c); console.log('FOUND:' + c); process.exit(0); } catch (e) {}
+}
+console.log('MISS'); process.exit(1);
+"""
+
+
+def run_web_doctor(cfg):
+    """Preflight completo del entorno macOS Web (VoiceOver + Chrome CDP).
+    Devuelve el numero de fallos (0 = entorno listo)."""
+    from .vo_mac import ax_is_trusted, screen_recording_ok
+    from .web_client import find_chrome_binary
+
+    fails = [0]
+    warns = [0]
+
+    def ok(m):
+        print("  [OK]   %s" % m)
+
+    def warn(m):
+        warns[0] += 1
+        print("  [WARN] %s" % m)
+
+    def fail(m):
+        fails[0] += 1
+        print("  [FAIL] %s" % m)
+
+    print("=== Doctor VoiceOver Web (macOS + Chrome) v%s ===\n" % VERSION)
+
+    print("Anfitrión y permisos macOS (TCC)")
+    if sys.platform == "darwin":
+        ok("SO: macOS")
+    else:
+        fail("SO %s -> vo_web requiere macOS (VoiceOver de escritorio)" % sys.platform)
+
+    vi = sys.version_info
+    if vi >= (3, 9):
+        ok("Python %d.%d.%d" % vi[:3])
+    else:
+        fail("Python %d.%d -> requiere >= 3.9" % vi[:2])
+
+    if ax_is_trusted():
+        ok("Permiso TCC Accesibilidad: concedido (envío de teclas VO y lectura de caption panel)")
+    else:
+        warn("Permiso TCC Accesibilidad: NO concedido -> Ajustes del Sistema > Privacidad y Seguridad > Accesibilidad (o usa --no-sweep)")
+
+    if screen_recording_ok():
+        ok("Permiso TCC Grabación de Pantalla: concedido (screencapture de ventana Chrome)")
+    else:
+        warn("Permiso TCC Grabación de Pantalla: NO concedido -> Ajustes del Sistema > Privacidad y Seguridad > Grabación de Pantalla (o usa --no-sweep)")
+
+    print("\nNavegador y CDP")
+    node_ok = False
+    try:
+        v = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=10)
+        ok("Node.js %s" % v.stdout.strip())
+        node_ok = True
+    except Exception:
+        fail("node no encontrado en PATH -> instala Node.js 18+")
+
+    if node_ok:
+        r = subprocess.run(["node", "-e", _PUPPETEER_CHECK_JS], capture_output=True, text=True, timeout=20)
+        found = (r.stdout or "").strip()
+        if found.startswith("FOUND:"):
+            ok("puppeteer resoluble (%s)" % found[6:])
+        else:
+            fail("puppeteer no resoluble -> npm i -g puppeteer (o pa11y)")
+
+    chrome = find_chrome_binary(cfg)
+    if chrome:
+        ok("Chrome: %s" % chrome)
+    else:
+        warn("Chrome no encontrado en /Applications -> puppeteer usará Chrome for Testing si está instalado")
+
+    print("\nRed / endpoints del perfil")
+    eps = [(k, cfg.get(k)) for k in ("login_url", "target_url", "hybrid_cdn_url") if cfg.get(k)]
+    if not eps:
+        warn("el perfil no define login_url/target_url")
+    for key, url in eps:
+        okp, det = probe_host(url)
+        host = urlparse(url).hostname or url
+        if okp:
+            ok("%s (%s): conecta" % (host, key))
+        else:
+            fail("%s (%s): %s -> %s" % (host, key, det, net_hint(url)))
+
+    print("\nResultado: %d fallo(s), %d aviso(s)" % (fails[0], warns[0]))
+    return fails[0]
