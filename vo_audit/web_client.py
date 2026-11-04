@@ -234,9 +234,11 @@ async function finishLoadingProbe(page, st, outDir) {
           const loadingTxt = (stt.announcers.find(a => (a.text || '').replace(/\u200B/g, '').trim().length > 1) || {}).text || '';
           if (loadingTxt) {
             await page.evaluate(() => {
-              const el = document.querySelector('span[data-testid="screen-reader"], [role="status"], [aria-live]');
+              const cands = Array.from(document.querySelectorAll('span[data-testid="screen-reader"], [role="status"], [aria-live]'));
+              const el = cands.find(n => (n.textContent || '').replace(/\u200B/g, '').trim().length > 1) || cands[0];
               if (!el) return;
-              el.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:999999;background:#111;color:#0f0;font:16px monospace;padding:10px 14px;border:2px solid #0f0;border-radius:6px;clip:auto!important;width:auto!important;height:auto!important;overflow:visible!important;';
+              el.setAttribute('data-orig-style', el.getAttribute('style') || '');
+              el.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:999999;background:#111;color:#0f0;font:16px monospace;padding:10px 14px;border:2px solid #0f0;border-radius:6px;clip:auto!important;clip-path:none!important;width:auto!important;height:auto!important;overflow:visible!important;';
             }).catch(() => {});
             await sleep(400);
             const p = path.join(outDir, 'img', pngName + '_announcer.png');
@@ -256,6 +258,12 @@ async function finishLoadingProbe(page, st, outDir) {
   } else {
     await page.emulateNetworkConditions(null).catch(() => {});
   }
+  await page.evaluate(() => {
+    document.querySelectorAll('[data-orig-style]').forEach(el => {
+      el.setAttribute('style', el.getAttribute('data-orig-style') || '');
+      el.removeAttribute('data-orig-style');
+    });
+  }).catch(() => {});
   if (!captured) {
     const p = path.join(outDir, 'img', pngName + '_skeleton.png');
     await page.screenshot({ path: p }).catch(() => {});
@@ -361,13 +369,17 @@ async function runViewSteps(page, steps, outDir) {
         window.history.pushState({}, '', p);
         window.dispatchEvent(new PopStateEvent('popstate'));
       }, st.spa_path).catch(() => {});
-      for (let w = 0; w < 12; w++) {
-        await sleep(800);
-        const h1Changed = await page.evaluate((prev) => {
-          const h1 = document.querySelector('main h1, h1');
-          return h1 && h1.innerText && h1.innerText.trim() !== prev;
-        }, prevH1).catch(() => false);
-        if (h1Changed) break;
+      if (st.loading_probe) {
+        await sleep(150);
+      } else {
+        for (let w = 0; w < 12; w++) {
+          await sleep(800);
+          const h1Changed = await page.evaluate((prev) => {
+            const h1 = document.querySelector('main h1, h1');
+            return h1 && h1.innerText && h1.innerText.trim() !== prev;
+          }, prevH1).catch(() => false);
+          if (h1Changed) break;
+        }
       }
     }
     if (st.goto_url) {
@@ -568,7 +580,9 @@ const COLLECT_VO_ITEMS_JS = `(() => {
     }
 
     if (tag === 'input' && (el.type || 'text').toLowerCase() !== 'radio' && (el.type || 'text').toLowerCase() !== 'checkbox') {
-      const txt = (ariaLblBy || ariaLbl || el.getAttribute('placeholder') || '').replace(/\\s+/g, ' ').trim();
+      const lblEl = el.id ? document.querySelector('label[for="' + el.id + '"]') : el.closest('label');
+      if (lblEl) visitedEls.add(lblEl);
+      const txt = (ariaLblBy || ariaLbl || (lblEl ? (lblEl.innerText || lblEl.textContent || '') : '') || el.getAttribute('placeholder') || '').replace(/\\s+/g, ' ').trim();
       const val = (el.value || '').trim();
       items.push({
         el,
@@ -757,6 +771,10 @@ const COLLECT_VO_ITEMS_JS = `(() => {
   }
 
   await performLogin(page, job.cfg);
+  if (page.url() === 'about:blank' && job.cfg && job.cfg.target_url) {
+    await page.goto(job.cfg.target_url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await sleep(800);
+  }
 
   const results = {};
   for (const v of job.views) {
