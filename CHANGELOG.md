@@ -2,6 +2,18 @@
 
 Todas las mejoras relevantes de la herramienta de auditoría lineal de accesibilidad con iOS VoiceOver y Xcode se registran en este archivo siguiendo [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) y [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.7.0] - 2026-11-04
+
+### Añadido
+- **Modo Web para macOS: `vo_web.py` + `vo_audit/web_client.py` + `vo_audit/vo_mac.py` (ver `docs/vo-web-macos.md`)**:
+  - Auditoria lineal de accesibilidad Web con **VoiceOver de macOS + Google Chrome** (equivalente a `nvda_audit` para NVDA): Chrome visible via CDP (puppeteer), login con reintento ante pantallas de error del servicio (`auth.login_retry`), navegacion declarativa `cdp_steps` (`spa_path`, `click_text`, `click_selector`, `type_selector`, `eval`, `goto_url`, `wait_for_text`, `wait_for_selector`, `wait_for_skeleton`) y sondeo del panel de caption de VoiceOver durante la carga (anuncios de live regions).
+  - Barrido lineal con el cursor real de VoiceOver (`VO+flecha` via System Events), caption del panel leido por AX UI scripting (sin OCR) y captura de ventana con `screencapture` (incluye el recuadro de foco del SO).
+  - Sondas dinamicas heredadas: `loading_probe` (red emulada + registro de anuncios con codepoints + capturas skeleton/announcer) y `probe_control` (expansion de combobox/pickers + dump ARIA, con resolucion de combobox etiquetados via `htmlFor`/`aria-labelledby`).
+  - VoiceOver se activa solo (`open VoiceOver.app`) y se restaura su estado al final (`--keep-vo` lo conserva); `--no-sweep` ejecuta solo navegacion + sondas DOM.
+  - Preflight de permisos TCC (`tcc_preflight`): detecta falta de Accesibilidad y Grabacion de Pantalla con instrucciones antes de tocar VoiceOver.
+  - Salida: `steps.json` + `announcements.json` (anuncios VO + probes) + `report.html` (mismo generador que iOS).
+- **`demo/loading_page.html`**: pagina local que simula un LiveAnnouncer (`role="status"` con `Loading ...` -> reset `U+200B`) y un skeleton temporizado, para validar el pipeline sin backend (`?announce=0` desactiva el anuncio como caso negativo).
+
 ## [0.6.0] - 2026-11-03
 
 ### Añadido

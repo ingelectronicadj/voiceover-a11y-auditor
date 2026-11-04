@@ -1,6 +1,9 @@
-# VoiceOver Audit (`v0.5.0`)
+# VoiceOver Audit (`v0.7.0`)
 
-Herramienta de auditoría lineal de accesibilidad para **iOS VoiceOver** sobre **Xcode / iOS Simulator** - equivalente a **NVDA Speech Viewer / Accessibility Inspector** para aplicaciones **nativas (`UIKit`, `SwiftUI`) e híbridas (`WKWebView`)**.
+Herramienta de auditoría lineal de accesibilidad para **VoiceOver** en dos plataformas:
+
+- **`voiceover_audit.py` - iOS VoiceOver** sobre **Xcode / iOS Simulator** - equivalente a **NVDA Speech Viewer / Accessibility Inspector** para aplicaciones **nativas (`UIKit`, `SwiftUI`) e híbridas (`WKWebView`)**.
+- **`vo_web.py` - VoiceOver de macOS + Google Chrome** para aplicaciones web de escritorio: navegación declarativa via CDP, sondeo del panel de caption durante la carga (anuncios de live regions) y barrido lineal con el cursor real de VoiceOver. Ver `docs/vo-web-macos.md`.
 
 Automatiza el recorrido lineal de foco de VoiceOver a través del motor nativo de Xcode (`AccessibilityAuditDeviceManager.framework` + `AccessibilityAudit.framework`), captura la imagen con el recuadro de foco y el anuncio hablado exacto (`captionText` / `spokenDescription`) de cada paso, adapta automáticamente paquetes `.ipa` de dispositivos físicos (`arm64`) para correr en el simulador en Macs con Apple Silicon, inspecciona en vivo el árbol DOM / ARIA e `IndexedDB` de `WKWebView` mediante **Safari Remote Web Inspector (`WebInspector.framework`)**, evalúa **16 reglas de accesibilidad (`VO-*`) mapeadas a los 86 criterios oficiales de WCAG 2.2 (A / AA / AAA)** y genera un reporte ejecutivo interactivo (`report.html` + `steps.json` + portada maestra `index.html`).
 
