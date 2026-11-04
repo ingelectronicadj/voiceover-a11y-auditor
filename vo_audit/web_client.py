@@ -450,6 +450,270 @@ async function runViewSteps(page, steps, outDir) {
   return { focusIssue: lastTransitionFocusIssue, probes };
 }
 
+const COLLECT_VO_ITEMS_JS = `(() => {
+  const openDlg = Array.from(document.querySelectorAll('[role="dialog"]')).find(d => {
+    const r = d.getBoundingClientRect();
+    return r.width > 50 && r.height > 50;
+  });
+  const scope = openDlg || document.querySelector('main') || document.body;
+  const items = [];
+  const visitedEls = new Set();
+
+  function resolveAriaLabelledBy(el) {
+    const ids = (el.getAttribute('aria-labelledby') || '').trim().split(/\\s+/).filter(Boolean);
+    if (!ids.length) return '';
+    return ids.map(id => {
+      const ref = document.getElementById(id);
+      return ref ? (ref.getAttribute('aria-label') || ref.innerText || ref.textContent || '').trim() : '';
+    }).filter(Boolean).join(' ');
+  }
+
+  function isHidden(el) {
+    let cur = el;
+    while (cur && cur !== document.body) {
+      if (cur.getAttribute?.('aria-hidden') === 'true' || cur.hasAttribute?.('inert')) return true;
+      if (cur.getAttribute?.('data-testid')?.startsWith('DevTools')) return true;
+      const st = window.getComputedStyle(cur);
+      if (st.display === 'none' || st.visibility === 'hidden') return true;
+      cur = cur.parentElement;
+    }
+    return false;
+  }
+
+  function buildSelector(el) {
+    const tag = el.tagName.toLowerCase();
+    const tid = el.getAttribute('data-testid') || '';
+    const id = el.id || '';
+    const role = el.getAttribute('role') || '';
+    let s = tag;
+    if (id && !/\\s/.test(id)) s += '#' + id;
+    if (tid) s += '[data-testid="' + tid + '"]';
+    if (role) s += '[role="' + role + '"]';
+    return s;
+  }
+
+  const all = Array.from(scope.querySelectorAll('*'));
+  let chartCount = 0;
+
+  for (const el of all) {
+    if (visitedEls.has(el) || isHidden(el)) continue;
+    const tag = el.tagName.toLowerCase();
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    const tid = el.getAttribute('data-testid') || '';
+    const ariaLbl = (el.getAttribute('aria-label') || '').trim();
+    const ariaLblBy = resolveAriaLabelledBy(el);
+
+    if (/^h[1-6]$/.test(tag) || role === 'heading') {
+      const lvl = /^h[1-6]$/.test(tag) ? tag.slice(1) : (el.getAttribute('aria-level') || '2');
+      const txt = (ariaLblBy || ariaLbl || el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+      if (!txt) continue;
+      el.querySelectorAll('*').forEach(c => visitedEls.add(c));
+      items.push({
+        el,
+        label: txt,
+        role: 'Heading ' + lvl,
+        utterance: 'heading level ' + lvl + ', ' + txt,
+        selector: buildSelector(el)
+      });
+      continue;
+    }
+
+    if (role === 'tab') {
+      const txt = (ariaLblBy || ariaLbl || el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+      const sel = el.getAttribute('aria-selected') === 'true';
+      const parentList = el.closest('[role="tablist"]');
+      const tabs = parentList ? Array.from(parentList.querySelectorAll('[role="tab"]')) : [el];
+      const idx = tabs.indexOf(el) + 1;
+      el.querySelectorAll('*').forEach(c => visitedEls.add(c));
+      items.push({
+        el,
+        label: txt,
+        role: 'Tab',
+        utterance: txt + ', ' + (sel ? 'selected, ' : '') + 'tab, ' + idx + ' of ' + tabs.length,
+        selector: buildSelector(el)
+      });
+      continue;
+    }
+
+    if (tag === 'a' || role === 'link') {
+      const txt = (ariaLblBy || ariaLbl || el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+      el.querySelectorAll('*').forEach(c => visitedEls.add(c));
+      items.push({
+        el,
+        label: txt || '(empty link)',
+        role: 'Link',
+        utterance: (txt ? (txt + ', ') : '') + 'link',
+        selector: buildSelector(el)
+      });
+      continue;
+    }
+
+    if (tag === 'button' || role === 'button' || role === 'combobox') {
+      const txt = (ariaLblBy || ariaLbl || el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+      const nestedAria = !txt ? (el.querySelector('span[aria-label]:not([role]), div[aria-label]:not([role])')?.getAttribute('aria-label') || '').trim() : '';
+      const dis = el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true';
+      const exp = el.getAttribute('aria-expanded');
+      const isCombo = role === 'combobox' || el.getAttribute('aria-haspopup') === 'listbox';
+      el.querySelectorAll('*').forEach(c => visitedEls.add(c));
+      const uttLbl = txt ? txt : ('Unlabelled' + (nestedAria ? (' [span child aria-label="' + nestedAria + '"]') : ''));
+      const voRole = isCombo ? 'pop up button' : 'button';
+      items.push({
+        el,
+        label: txt || ('Unlabelled button' + (nestedAria ? (' (span aria-label: ' + nestedAria + ')') : '')),
+        role: isCombo ? 'ComboBox' : 'Button',
+        utterance: uttLbl + (exp === 'true' ? ', expanded' : (exp === 'false' ? ', collapsed' : '')) + (dis ? ', dimmed' : '') + ', ' + voRole,
+        selector: buildSelector(el)
+      });
+      continue;
+    }
+
+    if (tag === 'input' && (el.type || 'text').toLowerCase() !== 'radio' && (el.type || 'text').toLowerCase() !== 'checkbox') {
+      const txt = (ariaLblBy || ariaLbl || el.getAttribute('placeholder') || '').replace(/\\s+/g, ' ').trim();
+      const val = (el.value || '').trim();
+      items.push({
+        el,
+        label: txt,
+        role: 'TextField',
+        utterance: (val ? (val + ', ') : '') + txt + ', edit text',
+        selector: buildSelector(el)
+      });
+      continue;
+    }
+
+    if (role === 'radio' || tid === 'selector-row') {
+      const txt = (ariaLblBy || ariaLbl || el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+      const chk = (el.getAttribute('aria-checked') === 'true' || el.getAttribute('data-selected') === 'true') ? 'selected' : 'unselected';
+      el.querySelectorAll('*').forEach(c => visitedEls.add(c));
+      items.push({
+        el,
+        label: txt,
+        role: role === 'radio' ? 'RadioButton' : 'SelectorRow',
+        utterance: txt + (role === 'radio' ? (', ' + chk + ', radio button') : ''),
+        selector: buildSelector(el)
+      });
+      continue;
+    }
+
+    if (tag === 'input' && (el.type || '').toLowerCase() === 'radio') {
+      const txt = (ariaLblBy || ariaLbl || '').replace(/\\s+/g, ' ').trim();
+      const chk = el.checked ? 'selected' : 'unselected';
+      const group = el.name ? Array.from(scope.querySelectorAll('input[type="radio"][name="' + el.name + '"]')) : [el];
+      const idx = group.indexOf(el) + 1;
+      items.push({
+        el,
+        label: txt,
+        role: 'RadioButton',
+        utterance: txt + ', ' + chk + ', radio button, ' + idx + ' of ' + group.length,
+        selector: buildSelector(el)
+      });
+      continue;
+    }
+
+    if (tag === 'input' && (el.type || '').toLowerCase() === 'checkbox') {
+      const lblEl = el.id ? document.querySelector('label[for="' + el.id + '"]') : el.closest('label');
+      const txt = (ariaLblBy || ariaLbl || (lblEl ? lblEl.innerText : '') || '').replace(/\\s+/g, ' ').trim();
+      const chk = el.checked ? 'checked' : 'unchecked';
+      items.push({
+        el,
+        label: txt || 'Unlabelled checkbox',
+        role: 'CheckBox',
+        utterance: (txt || 'Unlabelled') + ', ' + chk + ', checkbox',
+        selector: buildSelector(el)
+      });
+      continue;
+    }
+
+    if (tag === 'svg' && tid.startsWith('line-chart')) {
+      const txt = (ariaLblBy || ariaLbl || '').replace(/\\s+/g, ' ').trim();
+      items.push({
+        el,
+        label: txt || 'Unlabelled',
+        role: 'Image',
+        utterance: (txt ? (txt + ', image') : 'Unlabelled image'),
+        selector: buildSelector(el)
+      });
+      continue;
+    }
+
+    if (tag === 'circle' && (tid === 'node-circle' || role === 'img' || ariaLbl)) {
+      chartCount += 1;
+      if (chartCount <= 5) {
+        items.push({
+          el,
+          label: ariaLbl,
+          role: 'Image',
+          utterance: 'Date: ' + ariaLbl.replace(/^Date:\\s*/i, '') + ', image',
+          selector: buildSelector(el),
+          isChartPoint: true
+        });
+      }
+      continue;
+    }
+
+    if (tag === 'img') {
+      const alt = el.getAttribute('alt');
+      if (alt === '') continue;
+      items.push({
+        el,
+        label: alt || 'Unlabelled image',
+        role: 'Image',
+        utterance: (alt ? (alt + ', image') : 'Unlabelled image'),
+        selector: buildSelector(el)
+      });
+      continue;
+    }
+
+    if (role === 'status') {
+      const rawTxt = el.textContent || '';
+      const cleanTxt = rawTxt.replace(/\\u200b/g, '').trim();
+      if (rawTxt.length > 0 && !cleanTxt) {
+        items.push({
+          el,
+          label: rawTxt,
+          role: 'Status',
+          utterance: 'status',
+          selector: buildSelector(el)
+        });
+      }
+      continue;
+    }
+
+    if (['p', 'dt', 'dd', 'legend', 'span', 'label'].includes(tag)) {
+      if (tag === 'span' && tid !== 'screen-reader' && tid !== 'text') continue;
+      const hasInteractiveChild = el.querySelector('a, button, input, select, textarea');
+      if (tag !== 'label' && hasInteractiveChild) continue;
+      const directTxt = (tag === 'label')
+        ? Array.from(el.querySelectorAll('[data-testid="text"]')).map(s => s.innerText || s.textContent || '').join(' ').trim()
+        : (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+      if (!directTxt) continue;
+      if (tag === 'label') {
+        el.querySelectorAll('[data-testid="text"], [data-pill-content] *').forEach(c => visitedEls.add(c));
+      } else {
+        el.querySelectorAll('*').forEach(c => visitedEls.add(c));
+      }
+      items.push({
+        el,
+        label: directTxt,
+        role: tag === 'dt' ? 'Term' : 'StaticText',
+        utterance: directTxt,
+        selector: buildSelector(el)
+      });
+    }
+  }
+
+  return items.map((it, idx) => {
+    it.el.setAttribute('data-vo-step-idx', String(idx));
+    return {
+      idx,
+      label: it.label,
+      role: it.role,
+      utterance: it.utterance,
+      selector: it.selector,
+      isChartPoint: !!it.isChartPoint
+    };
+  });
+})()`;
+
 (async () => {
   const launchOpts = {
     headless: false,
@@ -511,18 +775,129 @@ async function runViewSteps(page, steps, outDir) {
     const domSnapshot = (typeof rawDom === 'string') ? JSON.parse(rawDom) : rawDom;
     if (domSnapshot && spaFocusIssue) domSnapshot.spaFocusIssue = spaFocusIssue;
     const finalState = await page.evaluate(announcerStateJS()).catch(() => null);
+
+    const cdpSteps = [];
+    const treeNodes = [];
+    const visited = [];
+    if (job.cdp_sweep) {
+      const rawItems = await page.evaluate(COLLECT_VO_ITEMS_JS).catch(() => []);
+      const maxSteps = Math.min(rawItems.length, v.max_steps || 40);
+      for (let i = 0; i < maxSteps; i++) {
+        const it = rawItems[i];
+        const stepNum = i + 1;
+        const box = await page.evaluate((stepIdx, utt, stepN, totalN) => {
+          const el = document.querySelector('[data-vo-step-idx="' + stepIdx + '"]');
+          let rect = { x: 40, y: 120, width: 220, height: 32 };
+          if (el) {
+            el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+            const r = el.getBoundingClientRect();
+            if (r.width > 1 && r.height > 1) {
+              rect = { x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) };
+            }
+          }
+          let hl = document.getElementById('__vo_focus_ring__');
+          if (!hl) {
+            hl = document.createElement('div');
+            hl.id = '__vo_focus_ring__';
+            document.body.appendChild(hl);
+          }
+          hl.style.cssText = [
+            'position:fixed',
+            'left:' + Math.max(2, rect.x - 4) + 'px',
+            'top:' + Math.max(2, rect.y - 4) + 'px',
+            'width:' + Math.max(18, rect.width + 8) + 'px',
+            'height:' + Math.max(18, rect.height + 8) + 'px',
+            'border:3px solid #111827',
+            'box-shadow:0 0 0 2px #ffffff, 0 0 0 4px #111827',
+            'border-radius:5px',
+            'pointer-events:none',
+            'z-index:2147483646'
+          ].join(';');
+
+          let bar = document.getElementById('__vo_caption_panel__');
+          if (!bar) {
+            bar = document.createElement('div');
+            bar.id = '__vo_caption_panel__';
+            document.body.appendChild(bar);
+          }
+          bar.style.cssText = [
+            'position:fixed',
+            'left:50%',
+            'bottom:18px',
+            'transform:translateX(-50%)',
+            'min-width:520px',
+            'max-width:88vw',
+            'background:rgba(17,24,39,0.92)',
+            'color:#f9fafb',
+            'padding:11px 18px',
+            'border-radius:10px',
+            'border:2px solid rgba(255,255,255,0.75)',
+            'font:500 14px/1.4 -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif',
+            'box-shadow:0 12px 28px rgba(0,0,0,0.45)',
+            'pointer-events:none',
+            'z-index:2147483647'
+          ].join(';');
+          bar.textContent = '[VoiceOver macOS #' + stepN + '/' + totalN + ']  ' + utt;
+
+          return [rect.x, rect.y, rect.x + rect.width, rect.y + rect.height];
+        }, it.idx, it.utterance, stepNum, maxSteps);
+
+        const pngPath = path.join(v.out_dir, 'img', 'step_' + String(stepNum).padStart(3, '0') + '.png');
+        await page.screenshot({ path: pngPath });
+
+        const nodeObj = {
+          cls: it.role,
+          text: it.label,
+          desc: it.label,
+          rid: it.selector,
+          pkg: 'web',
+          bounds: box,
+          focusable: true,
+          clickable: ['Button', 'ComboBox', 'Link', 'Tab', 'RadioButton', 'TextField'].includes(it.role)
+        };
+        treeNodes.push(nodeObj);
+        visited.push([it.label, it.label, it.role, box]);
+        cdpSteps.push({
+          i: stepNum,
+          png: pngPath,
+          node: nodeObj,
+          utterance: it.utterance,
+          raw_caption: it.utterance,
+          page_title: (domSnapshot && domSnapshot.viewHeading) || v.title,
+          is_skeleton: false,
+          box: box,
+          in_overlay: false,
+          label: it.label,
+          screen_change: stepNum === 1
+        });
+        console.log('      ' + String(stepNum).padStart(3, ' ') + '. ' + (it.label || '?').slice(0, 50).padEnd(52, ' ') + ' | VO: ' + it.utterance.slice(0, 65));
+      }
+      await page.evaluate(() => {
+        document.getElementById('__vo_focus_ring__')?.remove();
+        document.getElementById('__vo_caption_panel__')?.remove();
+        document.querySelectorAll('[data-vo-step-idx]').forEach(e => e.removeAttribute('data-vo-step-idx'));
+      }).catch(() => {});
+    }
+
     results[v.id] = {
       url: page.url(),
       title: v.title,
       h1: finalState ? finalState.h1 : '',
       announcers: finalState ? finalState.announcers : [],
       dom_snapshot: domSnapshot,
-      probes
+      probes,
+      steps: cdpSteps,
+      tree_nodes: treeNodes,
+      visited
     };
-    if (job.views.length > 1) continue;
+    if (!job.keep_open && job.views.length > 1) continue;
   }
 
   fs.writeFileSync(job.out_json, JSON.stringify(results));
+  if (!job.keep_open) {
+    await browser.close();
+    process.exit(0);
+  }
   console.log('      [VO Web] navegador listo; esperando barrido de VoiceOver');
   // Mantener el proceso vivo: Chrome es hijo de node y debe seguir abierto
   // mientras el barrido de VoiceOver actua sobre la ventana. El host mata
@@ -542,7 +917,7 @@ class WebClient:
         self.out_json = None
         self._tmpdir = None
 
-    def launch(self, views_payload):
+    def launch(self, views_payload, cdp_sweep=True, keep_open=False, headless=False):
         """Arranca el runner en background y devuelve el Popen. out_json aparece
         cuando la navegacion y las sondas DOM han terminado."""
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -556,9 +931,12 @@ class WebClient:
             "cfg": self.cfg,
             "chrome_path": find_chrome_binary(self.cfg),
             "locale": self.cfg.get("locale") or "en-US",
+            "headless": bool(headless),
             "viewport_width": int(self.cfg.get("viewport_width", 1440)),
             "viewport_height": int(self.cfg.get("viewport_height", 900)),
             "dom_extract_js": DOM_EXTRACT_JS,
+            "cdp_sweep": bool(cdp_sweep),
+            "keep_open": bool(keep_open),
             "views": views_payload,
             "out_json": self.out_json,
         }

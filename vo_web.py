@@ -146,25 +146,23 @@ def main():
             raise SystemExit("Sin --url ni vistas en config['web_views'].")
         view_queue = [list(web_views.keys())[0]]
 
-    # Preflight de permisos macOS (TCC) antes de tocar VoiceOver
-    if not args.no_sweep:
-        missing = tcc_preflight()
-        if missing:
-            print("[ERROR] Permisos macOS insuficientes para el barrido VoiceOver:")
-            for m in missing:
-                print("  - %s" % m)
-            print("\nSugerencia: concede los permisos y reintenta, o usa --no-sweep para")
-            print("ejecutar solo la navegacion y las sondas DOM (loading_probe/probe_control).")
-            raise SystemExit(4)
+    # Si el Mac tiene permisos TCC (Accesibilidad + Grabacion de Pantalla), puede usar
+    # System Events sobre VoiceOver.app; si estan bloqueados por MDM/admin corporativo,
+    # ejecuta automaticamente el barrido lineal VoiceOver macOS via Chrome CDP (sin permisos de admin).
+    missing_tcc = tcc_preflight()
+    use_os_vo = (not args.no_sweep) and (len(missing_tcc) == 0)
+    use_cdp_sweep = (not args.no_sweep) and (not use_os_vo)
+    if use_cdp_sweep:
+        print("[0/3] Sin permisos TCC de admin -> usando barrido VoiceOver macOS via Chrome CDP (no requiere permisos de sistema).")
 
-    # Estado previo de VoiceOver para restaurar al final (solo si hay barrido o sondeo de caption)
-    need_vo = not args.no_sweep or ax_is_trusted()
-    vo_was_on = vo_is_running()
-    if need_vo and not vo_was_on:
+    vo_was_on = vo_is_running() if use_os_vo else False
+    if use_os_vo and not vo_was_on:
         print("[0/3] Activando VoiceOver...")
         if not vo_set_enabled(True):
-            print("      [WARN] no se pudo activar VoiceOver automaticamente; continuando sin barrido VO")
-    elif vo_was_on:
+            print("      [WARN] no se pudo activar VoiceOver; pasando a barrido CDP")
+            use_os_vo = False
+            use_cdp_sweep = True
+    elif use_os_vo and vo_was_on:
         print("[0/3] VoiceOver ya esta activo.")
 
     client = WebClient(cfg)
@@ -177,30 +175,35 @@ def main():
             )
             img_dir = os.path.join(out_dir, "img")
             os.makedirs(img_dir, exist_ok=True)
+            for old_png in os.listdir(img_dir):
+                if old_png.startswith("step_") and old_png.endswith(".png"):
+                    try:
+                        os.remove(os.path.join(img_dir, old_png))
+                    except OSError:
+                        pass
 
             if args.url:
                 cdp_steps = [{"goto_url": args.url, "wait_sec": 4.0}]
             else:
                 cdp_steps = v_spec.get("cdp_steps") or []
+            max_steps = int(args.vo_steps or v_spec.get("steps") or 40)
             view = {
                 "id": v_id or "adhoc",
                 "title": v_spec.get("title") or args.url or "Vista adhoc",
                 "out_dir": out_dir,
+                "max_steps": max_steps,
                 "cdp_steps": cdp_steps,
             }
 
-            print("[1/3] Chrome CDP: login + navegacion + sondas...")
-            client.launch([view])
+            print("[1/3] Chrome CDP: login + navegacion + sondas%s..." % (" + barrido VoiceOver" if use_cdp_sweep else ""))
+            client.launch([view], cdp_sweep=use_cdp_sweep, keep_open=use_os_vo, headless=bool(cfg.get("headless", False)))
 
-            # Sondeo del caption panel DURANTE la carga (anuncios de live regions)
             announcements = []
             stop_poll = threading.Event()
             t = None
-            if ax_is_trusted():
+            if use_os_vo and ax_is_trusted():
                 t = threading.Thread(target=poll_captions, args=(stop_poll.is_set, announcements), daemon=True)
                 t.start()
-            else:
-                print("      [WARN] sin permiso de Accesibilidad: el sondeo del caption panel de VoiceOver no capturara anuncios")
             results = client.wait_ready(timeout=args.nav_timeout)
             stop_poll.set()
             if t:
@@ -215,7 +218,7 @@ def main():
             if isinstance(dom_snapshot, dict):
                 dom_snapshot["vo_announcements"] = announcements
                 dom_snapshot["final_announcers"] = vres.get("announcers")
-            if ax_is_trusted():
+            if use_os_vo and ax_is_trusted():
                 vo_spoke_load = any(re.search(r"load|carg|esper|wait", c.get("text") or "", re.I) for c in announcements)
                 for pr in probes:
                     if pr.get("type") == "loading_probe":
@@ -237,8 +240,17 @@ def main():
                     print("        [t=%5.1fs] %s" % (a["t"], a["text"][:90]))
 
             steps = []
-            if not args.no_sweep:
-                max_steps = int(args.vo_steps or v_spec.get("steps") or 40)
+            tree_nodes = vres.get("tree_nodes") or []
+            visited = {
+                (k[0], k[1], k[2], tuple(k[3]) if k[3] else None)
+                for k in (vres.get("visited") or [])
+            }
+            if use_cdp_sweep:
+                for s in vres.get("steps") or []:
+                    dom_el = match_dom_element(s.get("utterance"), s.get("label"), dom_snapshot, box=s.get("box")) if dom_snapshot else None
+                    s["dom"] = dom_el
+                    steps.append(s)
+            elif use_os_vo:
                 print("[2/3] Barrido VoiceOver (VO+Right x %d)..." % max_steps)
                 bring_app_front("Google Chrome")
                 time.sleep(1.0)
@@ -286,8 +298,8 @@ def main():
                     "png": step1_png,
                     "node": None,
                     "dom": match_dom_element(h1_lbl, h1_lbl, dom_snapshot) if dom_snapshot else None,
-                    "utterance": "%s, heading level 1" % h1_lbl,
-                    "raw_caption": "%s, heading level 1" % h1_lbl,
+                    "utterance": "heading level 1, %s" % h1_lbl,
+                    "raw_caption": "heading level 1, %s" % h1_lbl,
                     "page_title": h1_lbl,
                     "is_skeleton": False,
                     "box": None,
@@ -297,7 +309,8 @@ def main():
                 })
 
             print("[3/3] Generando reporte...")
-            meta = "plataforma=macOS VoiceOver + Chrome · url=%s · pasos=%d · %s" % (
+            meta = "plataforma=macOS VoiceOver + Chrome · modo=%s · url=%s · pasos=%d · %s" % (
+                "cdp-vo" if use_cdp_sweep else ("os-vo" if use_os_vo else "no-sweep"),
                 vres.get("url") or args.url or "?",
                 len(steps),
                 datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -309,7 +322,7 @@ def main():
                 "route_hash": (vres.get("url") or "").split("#")[-1],
             }
             save_steps_json(
-                steps, [], set(), out_dir, meta,
+                steps, tree_nodes, visited, out_dir, meta,
                 dom_snapshot=dom_snapshot or {"vo_announcements": announcements, "final_announcers": vres.get("announcers")},
                 view_info=view_info,
                 probes=probes,
@@ -318,14 +331,14 @@ def main():
             with open(ann_path, "w", encoding="utf-8") as f:
                 json.dump({"vo_captions": announcements, "probes": probes}, f, indent=2, ensure_ascii=False)
             path = build_report(
-                steps, [], set(), out_dir, meta,
+                steps, tree_nodes, visited, out_dir, meta,
                 dom_snapshot=dom_snapshot, view_info=view_info, cfg=cfg, probes=probes,
             )
             print("Reporte: %s" % path)
             completed.append(out_dir)
     finally:
         client.close()
-        if not args.keep_vo and not vo_was_on and vo_is_running():
+        if use_os_vo and not args.keep_vo and not vo_was_on and vo_is_running():
             print("Restaurando estado: desactivando VoiceOver...")
             vo_set_enabled(False)
 

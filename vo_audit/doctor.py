@@ -241,15 +241,10 @@ def run_web_doctor(cfg):
     else:
         fail("Python %d.%d -> requiere >= 3.9" % vi[:2])
 
-    if ax_is_trusted():
-        ok("Permiso TCC Accesibilidad: concedido (envío de teclas VO y lectura de caption panel)")
+    if ax_is_trusted() and screen_recording_ok():
+        ok("Permisos TCC (Accesibilidad + Grabación): concedidos (modo os-vo disponible)")
     else:
-        warn("Permiso TCC Accesibilidad: NO concedido -> Ajustes del Sistema > Privacidad y Seguridad > Accesibilidad (o usa --no-sweep)")
-
-    if screen_recording_ok():
-        ok("Permiso TCC Grabación de Pantalla: concedido (screencapture de ventana Chrome)")
-    else:
-        warn("Permiso TCC Grabación de Pantalla: NO concedido -> Ajustes del Sistema > Privacidad y Seguridad > Grabación de Pantalla (o usa --no-sweep)")
+        ok("Modo CDP VoiceOver activo: no requiere permisos TCC de administrador (usa page.screenshot + AX/DOM de Chrome)")
 
     print("\nNavegador y CDP")
     node_ok = False

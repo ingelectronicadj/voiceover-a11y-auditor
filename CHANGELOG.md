@@ -2,6 +2,12 @@
 
 Todas las mejoras relevantes de la herramienta de auditoría lineal de accesibilidad con iOS VoiceOver y Xcode se registran en este archivo siguiendo [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) y [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.7.2] - 2026-11-04
+
+### Añadido
+- **Barrido VoiceOver macOS 100% autónomo vía Chrome CDP sin permisos TCC de administrador (`vo_audit/web_client.py`, `vo_web.py`, `vo_audit/doctor.py`)**:
+  - Cuando el Mac corporativo bloquea la concesión de permisos TCC (`Accesibilidad` y `Grabación de Pantalla`), `vo_web.py` ejecuta automáticamente el barrido lineal (`COLLECT_VO_ITEMS_JS`) dentro de Chrome vía CDP con la sintaxis real de VoiceOver macOS (`heading level N, ...`, `..., pop up button`, `..., dimmed, button`, `..., selected, radio button, M of N`, `status`), renderizando el anillo de foco blanco/negro de VoiceOver (`__vo_focus_ring__`) y el panel de caption (`__vo_caption_panel__`) y capturando cada parada con `page.screenshot()` sin requerir permisos de administrador del sistema.
+
 ## [0.7.1] - 2026-11-04
 
 ### Añadido
