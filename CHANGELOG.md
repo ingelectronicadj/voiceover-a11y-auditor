@@ -2,6 +2,13 @@
 
 Todas las mejoras relevantes de la herramienta de auditoría lineal de accesibilidad con iOS VoiceOver y Xcode se registran en este archivo siguiendo [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) y [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.7.3] - 2026-11-06
+
+### Añadido
+- **`network_overrides` con `mock_delay_ms` en iOS RWI y macOS Web (`vo_audit/rwi.py`, `vo_audit/web_client.py`, `voiceover_audit.py`)**:
+  - Inyecta en `WKWebView` un interceptor de `window.fetch` a partir de `cfg["network_overrides"]` y aplica `mock_delay_ms` (`3200 ms` por defecto) mientras `loading_probe` está activo, permitiendo auditar skeletons de pasos intermedios (ej. Step 2 Order Simulation) tanto en iOS como en macOS Web.
+- **Selección del buffer `[aria-live]` no vacío, `clip-path: none !important`, restauración de `data-orig-style` al finalizar `loading_probe` y resolución de `<label for="...">` en inputs** (`vo_audit/rwi.py`, `vo_audit/web_client.py`).
+
 ## [0.7.2] - 2026-11-04
 
 ### Añadido

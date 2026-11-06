@@ -122,7 +122,11 @@ def navigate_to_view(ios_client, cfg, view_spec):
         ios_client.tap_accessible_element(match_text=tap_match, norm_coord=tap_coord)
         time.sleep(float(view_spec.get("entry_wait_sec", 6.0)))
     rwi_steps = view_spec.get("rwi_steps") or view_spec.get("cdp_steps")
-    return capture_webview_dom(ios_client, cdp_steps=rwi_steps)
+    return capture_webview_dom(
+        ios_client,
+        cdp_steps=rwi_steps,
+        network_overrides=cfg.get("network_overrides"),
+    )
 
 
 def _print_simulators(ios_client):

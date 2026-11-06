@@ -255,8 +255,18 @@ def _rwi_eval(ios_client, js_expr, await_promise=False):
             pass
 
 
-def _build_steps_js(cdp_steps):
+def _build_steps_js(cdp_steps, network_overrides=None):
     lines = ["const __vo_probes = [];"]
+    if network_overrides:
+        ov_json = json.dumps(network_overrides)
+        lines.append(
+            "{ window.__voNetOverrides = %s; window.__voLoadingProbeDelayMs = window.__voLoadingProbeDelayMs || 0; "
+            "if (!window.__voFetchPatched) { window.__voFetchPatched = true; const origFetch = window.fetch ? window.fetch.bind(window) : null; "
+            "if (origFetch) { window.fetch = async function(input, init) { const u = typeof input === 'string' ? input : (input && input.url) || ''; "
+            "for (const [pat, body] of Object.entries(window.__voNetOverrides || {})) { if (u.includes(pat)) { const d = window.__voLoadingProbeDelayMs || 0; if (d > 0) await new Promise(r => setTimeout(r, d)); "
+            "const txt = typeof body === 'string' ? body : JSON.stringify(body); return new Response(txt, { status: 200, headers: { 'Content-Type': 'application/json' } }); } } "
+            "return origFetch(input, init); }; } } }" % ov_json
+        )
     for st in cdp_steps or []:
         if st.get("wait_for_text") or st.get("wait_for_selector") or "wait_for_skeleton" in st:
             w_cfg = json.dumps({
@@ -272,16 +282,26 @@ def _build_steps_js(cdp_steps):
                 "else { const _sc = Array.from(document.querySelectorAll('[class*=\"skeleton\" i], [data-testid*=\"skeleton\" i], [aria-busy=\"true\"]')).filter(e => { const r = e.getBoundingClientRect(); return r.height > 2 && r.width > 2; }).length; _ok = _w.skel ? _sc > 0 : _sc === 0; } "
                 "if (_ok) break; await new Promise(r => setTimeout(r, 400)); } }" % w_cfg
             )
+        if st.get("loading_probe"):
+            lp_init = st["loading_probe"] if isinstance(st["loading_probe"], dict) else {}
+            lines.append("window.__voLoadingProbeDelayMs = %d;" % int(lp_init.get("mock_delay_ms", 3200)))
         if st.get("hash"):
             lines.append("location.hash = %s;" % json.dumps(st["hash"]))
         elif st.get("spa_path"):
             p = json.dumps(st["spa_path"])
-            lines.append(
-                "{ const _prev = (document.querySelector('main h1, h1')?.innerText || '').trim(); "
-                "const _cb = document.querySelector('[role=\"dialog\"] button[aria-label=\"Close\"], [role=\"dialog\"] button[data-testid=\"close-button\"]'); if (_cb) _cb.click(); "
-                "window.history.pushState({}, '', %s); window.dispatchEvent(new PopStateEvent('popstate')); "
-                "for (let _w = 0; _w < 10; _w++) { await new Promise(r => setTimeout(r, 700)); const _h = (document.querySelector('main h1, h1')?.innerText || '').trim(); if (_h && _h !== _prev) break; } }" % p
-            )
+            if st.get("loading_probe"):
+                lines.append(
+                    "{ const _cb = document.querySelector('[role=\"dialog\"] button[aria-label=\"Close\"], [role=\"dialog\"] button[data-testid=\"close-button\"]'); if (_cb) _cb.click(); "
+                    "window.history.pushState({}, '', %s); window.dispatchEvent(new PopStateEvent('popstate')); "
+                    "await new Promise(r => setTimeout(r, 150)); }" % p
+                )
+            else:
+                lines.append(
+                    "{ const _prev = (document.querySelector('main h1, h1')?.innerText || '').trim(); "
+                    "const _cb = document.querySelector('[role=\"dialog\"] button[aria-label=\"Close\"], [role=\"dialog\"] button[data-testid=\"close-button\"]'); if (_cb) _cb.click(); "
+                    "window.history.pushState({}, '', %s); window.dispatchEvent(new PopStateEvent('popstate')); "
+                    "for (let _w = 0; _w < 10; _w++) { await new Promise(r => setTimeout(r, 700)); const _h = (document.querySelector('main h1, h1')?.innerText || '').trim(); if (_h && _h !== _prev) break; } }" % p
+                )
         elif st.get("click") or st.get("click_selector"):
             sel = json.dumps(st.get("click") or st.get("click_selector"))
             lines.append(
@@ -314,6 +334,7 @@ def _build_steps_js(cdp_steps):
         if st.get("loading_probe"):
             lp = st["loading_probe"] if isinstance(st["loading_probe"], dict) else {}
             w_ms = int(lp.get("watch_ms", 15000))
+            make_vis = "true" if lp.get("make_announcer_visible") else "false"
             lines.append(
                 "{ const _pr = { type: 'loading_probe', network: 'RWI-poll', announcements: [], skeleton_detected: false, screenshots: [], loading_announced: false }; "
                 "const _seen = {}; const _t0 = Date.now(); while (Date.now() - _t0 < %d) { "
@@ -321,7 +342,12 @@ def _build_steps_js(cdp_steps):
                 "if (!_seen[k]) { _seen[k] = 1; _pr.announcements.push({ selector: sel, text: txt, codepoints: Array.from(txt).map(c => 'U+' + c.codePointAt(0).toString(16).toUpperCase()) }); } "
                 "const cl = txt.replace(/\\u200B/g, '').trim(); if (cl.length > 1 && /load|carg|esper|wait/i.test(cl)) _pr.loading_announced = true; }); "
                 "const _sc = Array.from(document.querySelectorAll('[class*=\"skeleton\" i], [data-testid*=\"skeleton\" i], [aria-busy=\"true\"]')).filter(e => { const r = e.getBoundingClientRect(); return r.height > 2 && r.width > 2; }).length; "
-                "if (_sc > 0) _pr.skeleton_detected = true; if (_pr.skeleton_detected && _sc === 0) break; await new Promise(r => setTimeout(r, 350)); } __vo_probes.push(_pr); }" % w_ms
+                "if (_sc > 0) { _pr.skeleton_detected = true; if (%s && _pr.loading_announced) { const cands = Array.from(document.querySelectorAll('span[data-testid=\"screen-reader\"], [role=\"status\"], [aria-live]')); "
+                "const el = cands.find(n => (n.textContent || '').replace(/\\u200B/g, '').trim().length > 1) || cands[0]; if (el && !el.hasAttribute('data-orig-style')) { el.setAttribute('data-orig-style', el.getAttribute('style') || ''); "
+                "el.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:999999;background:#111;color:#0f0;font:16px monospace;padding:10px 14px;border:2px solid #0f0;border-radius:6px;clip:auto!important;clip-path:none!important;width:auto!important;height:auto!important;overflow:visible!important;'; } } } "
+                "if (_pr.skeleton_detected && _sc === 0) break; await new Promise(r => setTimeout(r, 350)); } "
+                "window.__voLoadingProbeDelayMs = 0; document.querySelectorAll('[data-orig-style]').forEach(el => { el.setAttribute('style', el.getAttribute('data-orig-style') || ''); el.removeAttribute('data-orig-style'); }); "
+                "__vo_probes.push(_pr); }" % (w_ms, make_vis)
             )
         if st.get("probe_control"):
             lbl = json.dumps(st["probe_control"])
@@ -356,9 +382,9 @@ def run_rwi_steps(ios_client, cdp_steps):
     _rwi_eval(ios_client, js, await_promise=True)
 
 
-def capture_webview_dom(ios_client, cdp_steps=None, allow_skeleton=False):
+def capture_webview_dom(ios_client, cdp_steps=None, allow_skeleton=False, network_overrides=None):
     """Ejecuta opcionalmente cdp_steps, reintenta si detecta pantalla de error o skeleton transitorio, y extrae el inventario DOM/ARIA y diccionario i18n (IndexedDB) en una unica sesion RWI."""
-    steps_code = _build_steps_js(cdp_steps) if cdp_steps else ""
+    steps_code = _build_steps_js(cdp_steps, network_overrides=network_overrides) if (cdp_steps or network_overrides) else ""
     auto_heal_js = ""
     if not allow_skeleton:
         auto_heal_js = """
