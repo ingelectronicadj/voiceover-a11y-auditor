@@ -192,6 +192,7 @@ function announcerStateJS() {
 
 async function startLoadingProbe(page, st) {
   const cfg = st.loading_probe || {};
+  globalThis.__nvdaLoadingProbeDelayMs = cfg.mock_delay_ms || 3200;
   const presetName = cfg.network || 'Slow 3G';
   const nc = (puppeteer.PredefinedNetworkConditions && puppeteer.PredefinedNetworkConditions[presetName])
     || { latency: 400, download: 50000, upload: 50000 };
@@ -253,6 +254,7 @@ async function finishLoadingProbe(page, st, outDir) {
     }
     await sleep(400);
   }
+  globalThis.__nvdaLoadingProbeDelayMs = 0;
   if (presetName === 'Offline') {
     await page.setOfflineMode(false).catch(() => {});
   } else {
@@ -756,12 +758,15 @@ const COLLECT_VO_ITEMS_JS = `(() => {
               }
             });
           } else {
-            req.respond({
+            const delayMs = globalThis.__nvdaLoadingProbeDelayMs || 0;
+            const sendMock = () => req.respond({
               status: 200,
               contentType: 'application/json',
               headers: { 'Access-Control-Allow-Origin': '*' },
               body: JSON.stringify(body)
             });
+            if (delayMs > 0) setTimeout(sendMock, delayMs);
+            else sendMock();
           }
           return;
         }
