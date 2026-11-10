@@ -2,6 +2,11 @@
 
 Todas las mejoras relevantes de la herramienta de auditoría lineal de accesibilidad con iOS VoiceOver y Xcode se registran en este archivo siguiendo [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) y [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.7.4] - 2026-11-10
+
+### Corregido
+- **Exclusión de descendientes `aria-hidden="true"` al calcular el nombre accesible en `DOM_EXTRACT_JS` (`vo_audit/rwi.py`) y refinamiento de `VO-CURR-001` (`vo_audit/rules.py`)**: cumple W3C ACCNAME 1.2 ignorando nodos hijos con `aria-hidden="true"` y no reporta `$` ambiguo cuando la etiqueta ya incluye `"pesos"` o `"dólares"`.
+
 ## [0.7.3] - 2026-11-06
 
 ### Añadido
