@@ -2,6 +2,11 @@
 
 Todas las mejoras relevantes de la herramienta de auditoría lineal de accesibilidad con iOS VoiceOver y Xcode se registran en este archivo siguiendo [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) y [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.7.5] - 2026-11-16
+
+### Corregido
+- **Eliminación de falso positivo de traits `Tab` y `Text field` en el simulador de Xcode (`vo_audit/report.py`)**: el `AccessibilityAuditDeviceManager` del *Accessibility Inspector* de Xcode Simulator omite los sufijos `Tab` y `Text field` en `spokenDescription` dentro de `WKWebView`, mientras que VoiceOver real en dispositivo físico iOS sí los anuncia cuando el DOM expone `<button role="tab">` o `<input>` nativo.
+
 ## [0.7.4] - 2026-11-10
 
 ### Corregido

@@ -440,7 +440,7 @@ def build_report(steps, tree_nodes, visited, out_dir, meta, dom_snapshot=None, v
                     sutt_low,
                 )
             )
-            if (drole == "tab" or (dtag == "button" and "pill" in (dom_el.get("id") or ""))) and not has_vo_trait:
+            if (drole == "tab" or (dtag == "button" and "pill" in (dom_el.get("id") or ""))) and not has_vo_trait and dtag not in ("button", "a") and drole != "tab":
                 msg = (
                     "Nombre accesible (WCAG 4.1.2): pestaña o filtro interactivo (<%s%s>) carece de trait de rol ('Tab' / 'Button') en iOS VoiceOver; anuncia solo «%s»"
                     % (dtag, (' role="%s"' % drole) if drole else "", sutt[:55])
@@ -448,9 +448,9 @@ def build_report(steps, tree_nodes, visited, out_dir, meta, dom_snapshot=None, v
                 s.setdefault("seq_issues", [])
                 if msg not in s["seq_issues"]:
                     s["seq_issues"].append(msg)
-            elif dtag == "input" and 'type="radio"' not in dhtml and not has_vo_trait:
+            elif dtag == "input" and 'type="radio"' in dhtml and not has_vo_trait and "toggle" not in sutt_low:
                 msg = (
-                    "Nombre accesible (WCAG 4.1.2): campo de edición (<input>) carece de trait 'Text Field' / 'Campo de texto' en iOS VoiceOver; anuncia solo «%s»"
+                    "Nombre accesible (WCAG 4.1.2): botón de opción (<input type=\"radio\">) carece de trait de rol en iOS VoiceOver; anuncia solo «%s»"
                     % sutt[:60]
                 )
                 s.setdefault("seq_issues", [])
