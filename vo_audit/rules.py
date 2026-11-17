@@ -322,10 +322,37 @@ def analyze_sequence_issues(steps):
         if nu:
             prev_norm = nu
 
-    # Detectar inversión de orden de foco horizontal (izquierda-derecha) en barras de acciones
+    # Detectar doble/triple parada en píldoras y tarjetas selectoras e inversión de orden de foco horizontal
     for idx in range(1, len(steps)):
         prev_s = steps[idx - 1]
         cur_s = steps[idx]
+        u1 = (prev_s.get("utterance") or "").strip().lower()
+        u2 = (cur_s.get("utterance") or "").strip().lower()
+        is_radio_u2 = bool(re.search(r"\b(radio|bot[oó]n de opci[oó]n|toggle|conmutador|activar/desactivar)\b", u2))
+        is_radio_u1 = bool(re.search(r"\b(radio|bot[oó]n de opci[oó]n|toggle|conmutador|activar/desactivar)\b", u1))
+        u1_core = re.sub(r",\s*(texto est[aá]tico|static text)\s*$", "", u1)
+        u1_core = re.sub(r"^[€$£\s\xa0]+", "", u1_core).strip()
+        u2_norm = u2.replace("\xa0", " ")
+        u1_core = u1_core.replace("\xa0", " ")
+        if u1_core and is_radio_u2 and not is_radio_u1 and u1_core in u2_norm:
+            if idx >= 2:
+                prev2_u = (steps[idx - 2].get("utterance") or "").strip().lower()
+                prev2_core = re.sub(r",\s*(texto est[aá]tico|static text)\s*$", "", prev2_u)
+                prev2_core = re.sub(r"^[€$£\s\xa0]+", "", prev2_core).strip().replace("\xa0", " ")
+                if prev2_core and not re.search(r"\b(radio|bot[oó]n de opci[oó]n|toggle|activar/desactivar)\b", prev2_u) and prev2_core in u2_norm:
+                    cur_s.setdefault("seq_issues", []).append(
+                        "Contenedor fusionado (WCAG 1.3.2 / 4.1.2): tarjeta selectora genera 3 paradas separadas en VoiceOver («%s» -> «%s» -> «%s»)"
+                        % (
+                            (steps[idx - 2].get("utterance") or "")[:24],
+                            (prev_s.get("utterance") or "")[:24],
+                            (cur_s.get("utterance") or "")[:45],
+                        )
+                    )
+                    continue
+            cur_s.setdefault("seq_issues", []).append(
+                "Contenedor fusionado (WCAG 1.3.2 / 4.1.2): píldora o tarjeta de selección genera paradas duplicadas en VoiceOver (primero texto estático «%s» y luego el control «%s»)"
+                % ((prev_s.get("utterance") or "")[:30], (cur_s.get("utterance") or "")[:55])
+            )
         b1 = prev_s.get("box")
         b2 = cur_s.get("box")
         if b1 and b2 and len(b1) == 4 and len(b2) == 4:

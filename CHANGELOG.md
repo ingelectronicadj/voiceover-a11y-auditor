@@ -2,6 +2,17 @@
 
 Todas las mejoras relevantes de la herramienta de auditoría lineal de accesibilidad con iOS VoiceOver y Xcode se registran en este archivo siguiendo [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) y [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.8.0] - 2026-11-17
+
+### Añadido
+- **Evidencias cortas en video `.mp4` listas para Jira (`vo_video_avf.swift`, `vo_audit/video.py`, `vo_audit/report.py`)**:
+  - Por cada regla `VO-*` con hallazgos (y sondas dinamicas con capturas), genera automaticamente un clip H.264 `.mp4` corto (4 a 11 s) en `video/<rule_id>_steps_<A>_<B>.mp4` usando `AVAssetWriter` nativo de macOS sin requerir `ffmpeg` externo, incrustado en cada tarjeta ejecutiva de `report.html` tanto en `voiceover_audit.py` (iOS) como en `vo_web.py` (macOS Web), desactivable con `--no-clips`.
+  - Nueva opcion `--record` en iOS Simulator (`vo_audit/ios_client.py`): graba video en vivo con `xcrun simctl io <udid> recordVideo --codec=h264` durante el barrido y guarda `video/live_walk.mp4` (incluido automaticamente en `--pack`).
+  - Nuevo modo `--diff BEFORE_DIR AFTER_DIR`: compara dos corridas VoiceOver (reglas resueltas, persistentes y nuevas) y genera `diff_report.html` junto con el clip comparativo lado a lado `video/before_after_comparison.mp4`.
+- **Boton "Copiar borrador Jira (6 secciones)" en cada hallazgo de `report.html` (`vo_audit/report.py`)**: genera al portapapeles el texto estructurado con las 6 secciones corporativas (`Description` con snippet DOM limpio, `Current result`, `Expected result`, `How to reproduce`, `Impact` y `WCAG criteria applicable`).
+- **Nuevas detecciones A11Y en WebView y secuencia bilingue (`vo_audit/rwi.py`, `vo_audit/rules.py`, `vo_audit/report.py`)**:
+  - Deteccion de regiones con scroll `role="region" tabindex="0"` sin `aria-label` ni `aria-labelledby`, dialogos `role="dialog"` con `aria-labelledby` roto o dentro de subarbol `inert`/`aria-hidden`, contenedores `#selectorRowNContent` / `#selectorCardContentNContent` sin `aria-hidden="true"` y deteccion bilingue de paradas duplicadas/triplicadas en pildoras y tarjetas selectoras.
+
 ## [0.7.5] - 2026-11-16
 
 ### Corregido

@@ -1,4 +1,4 @@
-# VoiceOver Audit (`v0.7.0`)
+# VoiceOver Audit (`v0.8.0`)
 
 Herramienta de auditoría lineal de accesibilidad para **VoiceOver** en dos plataformas:
 
@@ -78,9 +78,12 @@ python3 voiceover_audit.py --devices "iPhone 18 Pro,iPhone XR" --view-title "Wel
 | `--login` / `--refresh` | Ejecuta flujo de autenticación pre-auditoría si está configurado en el perfil | `False` |
 | `--keep-alive SECS` | Intervalo de renovación de sesión en segundo plano (`0` para desactivar) | Según config |
 | `--test-modals` | Abre y cierra modales/drawers detectados para validar `Focus Return` (`VO-FOCUS-001`) | `False` |
+| `--record` | Graba vídeo en vivo del simulador (`xcrun simctl recordVideo` -> `video/live_walk.mp4`) durante el barrido | `False` |
+| `--no-clips` | Desactiva la síntesis automática de clips `.mp4` cortos por hallazgo en `video/` | `False` |
+| `--diff BEFORE AFTER` | Compara dos corridas de VoiceOver y genera `diff_report.html` + vídeo comparativo Antes/Después `.mp4` | - |
 | `--compare IOS_DIR ANDROID_DIR` | Genera un reporte HTML comparativo lado a lado (`VoiceOver` vs `TalkBack`) para una vista o suite completa | - |
-| `--pack [ZIP_FILE]` | Genera portada maestra `index.html` y empaqueta la suite de reportes en un archivo `.zip` | - |
-| `--rebuild DIR` | Reconstruye `report.html` a partir de `steps.json` y las capturas de `DIR/img/` | - |
+| `--pack [ZIP_FILE]` | Genera portada maestra `index.html` y empaqueta la suite (con `img/` y `video/`) en un archivo `.zip` | - |
+| `--rebuild DIR` | Reconstruye `report.html` y los clips `.mp4` a partir de `steps.json` y las capturas de `DIR/img/` | - |
 
 ---
 
@@ -88,20 +91,23 @@ python3 voiceover_audit.py --devices "iPhone 18 Pro,iPhone XR" --view-title "Wel
 
 ```text
 .
-├── voiceover_audit.py         # Entrypoint CLI, orquestador multi-dispositivo y modo --self-test
+├── voiceover_audit.py         # Entrypoint CLI iOS Simulator, orquestador multi-dispositivo y --self-test
+├── vo_web.py                  # Entrypoint CLI macOS VoiceOver + Google Chrome y --self-test
 ├── vo_bridge.swift            # Puente nativo Xcode (XDMDeviceManager + AXAudit + WebInspector)
 ├── vo_ocr.swift               # OCR nativo sobre Vision.framework y detector de recuadro de foco
+├── vo_video_avf.swift         # Codificador H.264 (.mp4) nativo para clips de evidencia y Before/After
 ├── config.example.json        # Plantilla de configuración (copiar a profiles/<app>.local.json)
 ├── profiles/                  # Perfiles locales por app/entorno (*.local.json ignorados en git)
 ├── reportes/                  # Salidas organizadas por aplicación/proyecto (ignoradas en git)
 ├── CHANGELOG.md               # Historial de cambios por versión
 ├── vo_audit/
-│   ├── __init__.py            # Versión del paquete
+│   ├── __init__.py            # Versión del paquete (VERSION = "0.8.0")
 │   ├── config.py              # Carga de configuración jerárquica y mapeo de traits UIAccessibility
 │   ├── doctor.py              # Preflight --doctor y diagnóstico de red (probes TCP + pistas VPN)
-│   ├── ios_client.py          # Cliente xcrun simctl, parcheo Mach-O de .ipa y ejecución de vo_bridge
+│   ├── ios_client.py          # Cliente xcrun simctl, recordVideo, parcheo Mach-O de .ipa y vo_bridge
 │   ├── rwi.py                 # Inspector WKWebView DOM / ARIA e IndexedDB vía Safari WebInspector
 │   ├── vision.py              # Correlación geométrica de nodos y OCR de respaldo
+│   ├── video.py               # Orquestador de clips .mp4 por hallazgo, sondas y reporte --diff Before/After
 │   ├── wcag_catalog.py        # Taxonomía oficial WCAG 2.2 (86 criterios) y catálogo de 16 reglas VO-*
 │   ├── rules.py               # Motor de heurísticas por nodo, texto, secuencia, encabezados y omitidos
 │   ├── report.py              # Generador de steps.json, reporte HTML interactivo e índice/ZIP de suite

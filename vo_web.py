@@ -118,10 +118,21 @@ def main():
     ap.add_argument("--nav-timeout", type=int, default=300, help="timeout de login+navegacion+sondas (s)")
     ap.add_argument("--keep-vo", action="store_true", help="no restaurar el estado previo de VoiceOver al terminar")
     ap.add_argument("--no-sweep", action="store_true", help="solo navegacion+sondas DOM, sin barrido VoiceOver")
+    ap.add_argument("--no-clips", action="store_true", help="desactiva la generacion automatica de clips .mp4 cortos por hallazgo")
+    ap.add_argument("--diff", nargs=2, metavar=("BEFORE_DIR", "AFTER_DIR"), help="compara dos corridas VoiceOver y genera diff_report.html + clip .mp4 lado a lado")
     args = ap.parse_args()
 
     if args.self_test:
         run_self_test()
+        return
+
+    if args.diff:
+        from vo_audit.video import build_diff_report
+
+        d_html, d_mp4 = build_diff_report(args.diff[0], args.diff[1], args.out)
+        print("Reporte de regresion Before/After: %s" % d_html)
+        if d_mp4:
+            print("Clip comparativo Before/After:     %s" % d_mp4)
         return
 
     cfg = load_config(args.config, profile=args.profile)
@@ -331,8 +342,16 @@ def main():
             with open(ann_path, "w", encoding="utf-8") as f:
                 json.dump({"vo_captions": announcements, "probes": probes}, f, indent=2, ensure_ascii=False)
             path = build_report(
-                steps, tree_nodes, visited, out_dir, meta,
-                dom_snapshot=dom_snapshot, view_info=view_info, cfg=cfg, probes=probes,
+                steps,
+                tree_nodes,
+                visited,
+                out_dir,
+                meta,
+                dom_snapshot=dom_snapshot,
+                view_info=view_info,
+                cfg=cfg,
+                probes=probes,
+                enable_clips=not getattr(args, "no_clips", False),
             )
             print("Reporte: %s" % path)
             completed.append(out_dir)

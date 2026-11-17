@@ -163,6 +163,24 @@ DOM_EXTRACT_JS = r"""
           return (lblByTxt && !lblByTxt.toLowerCase().includes(visibleInner.toLowerCase())) ? (lblByTxt + ' (omite valor seleccionado «' + visibleInner + '»)') : '';
         })()
       : '';
+    const unlabelledScrollRegion = (role === 'region' && tabindex === '0' && !ariaLabel && (!ariaLabelledby || !ariaLabelledby.split(/\s+/).some(rid => (document.getElementById(rid)?.textContent || '').trim())))
+      ? (sel || 'div[role="region"][tabindex="0"]')
+      : '';
+    const brokenDialogLabelledby = (role === 'dialog' && ariaLabelledby)
+      ? (() => {
+          const ids = ariaLabelledby.split(/\s+/).filter(Boolean);
+          const valid = ids.filter(rid => {
+            const target = document.getElementById(rid);
+            if (!target || !(target.textContent || '').trim()) return false;
+            if (target.closest('[inert], [aria-hidden="true"]')) return false;
+            return true;
+          });
+          return valid.length === 0 ? ariaLabelledby : '';
+        })()
+      : '';
+    const unhiddenSelectorContent = ((id && /^selector(Row|CardContent)\d*Content$/i.test(id)) && ariaHidden !== 'true' && visibleInner)
+      ? (id + ': «' + visibleInner.slice(0, 50) + '»')
+      : '';
     let label = ariaLabel;
     if (!label && ariaLabelledby) {
       label = ariaLabelledby.split(/\s+/).map(rid => document.getElementById(rid)?.textContent?.trim() || '').join(' ').trim();
@@ -207,6 +225,12 @@ DOM_EXTRACT_JS = r"""
       label: label.slice(0, 220),
       i18nKey: keyMeta ? keyMeta.key : '',
       i18nOrigin: keyMeta ? keyMeta.origin : '',
+      nestedSpanAria,
+      inputPlaceholderOnly,
+      comboboxMissingValue,
+      unlabelledScrollRegion,
+      brokenDialogLabelledby,
+      unhiddenSelectorContent,
       html: el.outerHTML.replace(/\s+/g, ' ').slice(0, 300)
     });
   }

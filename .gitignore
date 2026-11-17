@@ -8,6 +8,7 @@ venv/
 # Binarios compilados localmente
 vo_ocr
 vo_bridge
+vo_video
 
 # Configuraciones locales con credenciales o endpoints internos
 config.local.json

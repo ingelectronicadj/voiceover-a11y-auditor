@@ -23,6 +23,8 @@ class IosClient:
         self.timeout = timeout
         self.device_name = ""
         self.os_version = ""
+        self._rec_proc = None
+        self._rec_path = None
 
     def _simctl(self, args, check=False, timeout=None, raw=False):
         cmd = ["xcrun", "simctl"] + list(args)
@@ -326,6 +328,41 @@ class IosClient:
     def screencap_png(self, path):
         self._simctl(["io", self.device, "screenshot", path], check=False)
         return path
+
+    def start_screenrecord(self, local_path):
+        """Inicia `xcrun simctl io <udid> recordVideo --codec=h264 --force` en segundo plano."""
+        self.stop_screenrecord()
+        os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
+        try:
+            if os.path.exists(local_path):
+                os.remove(local_path)
+        except OSError:
+            pass
+        cmd = ["xcrun", "simctl", "io", self.device, "recordVideo", "--codec=h264", "--force", local_path]
+        self._rec_path = local_path
+        self._rec_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+
+    def stop_screenrecord(self):
+        """Detiene limpiamente `simctl recordVideo` enviando SIGINT para escribir el atomo moov del MP4."""
+        import signal
+
+        out_p = self._rec_path
+        if self._rec_proc is not None:
+            try:
+                self._rec_proc.send_signal(signal.SIGINT)
+                self._rec_proc.wait(timeout=6)
+            except Exception:
+                try:
+                    self._rec_proc.terminate()
+                except Exception:
+                    pass
+            self._rec_proc = None
+            self._rec_path = None
+            time.sleep(0.5)
+        if out_p and os.path.isfile(out_p) and os.path.getsize(out_p) > 1024:
+            return out_p
+        return None
 
     def ensure_bridge_binary(self):
         src = os.path.join(SCRIPT_DIR, "vo_bridge.swift")
